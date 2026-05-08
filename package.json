@@ -1,0 +1,13 @@
+{
+  "name": "event-wingmate-telegram-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/bot.js",
+    "check": "node --check src/bot.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
