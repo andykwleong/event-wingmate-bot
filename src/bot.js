@@ -130,7 +130,10 @@ async function handleMessage(message) {
     return;
   }
 
-  const event = parseEvent(text, chatId, userId);
+  const enrichedText = await enrichTextWithLinkedPage(text);
+  const event = parseEvent(enrichedText, chatId, userId);
+  event.rawText = text;
+  event.sourceText = enrichedText;
   await enrichEventWithOpenAI(event);
   await saveEvent(event);
 
@@ -171,6 +174,7 @@ function parseEvent(text, chatId, userId) {
     title,
     url,
     rawText: text,
+    sourceText: text,
     location,
     eventType,
     startsAt,
@@ -188,11 +192,127 @@ function parseEvent(text, chatId, userId) {
   };
 }
 
+async function enrichTextWithLinkedPage(text) {
+  const url = text.match(/https?:\/\/\S+/i)?.[0]?.replace(/[)\].,]+$/, "");
+  if (!url) return text;
+
+  try {
+    const pageText = await fetchEventPageText(url);
+    if (!pageText) return text;
+
+    return [
+      text,
+      "",
+      "Fetched page details:",
+      pageText
+    ].join("\n");
+  } catch (error) {
+    console.error("Page fetch failed, using message only:", error.message);
+    return text;
+  }
+}
+
+async function fetchEventPageText(url) {
+  const response = await fetch(url, {
+    headers: {
+      "user-agent": "Mozilla/5.0 EventWingmateBot/0.1",
+      accept: "text/html,application/xhtml+xml"
+    },
+    redirect: "follow"
+  });
+
+  if (!response.ok) throw new Error(`Page returned ${response.status}`);
+
+  const html = await response.text();
+  const pieces = [
+    extractHtmlTitle(html),
+    extractMetaContent(html, "description"),
+    extractMetaContent(html, "og:title"),
+    extractMetaContent(html, "og:description"),
+    extractMetaContent(html, "og:site_name"),
+    ...extractJsonLdSummaries(html)
+  ];
+
+  return uniqueNonEmpty(pieces)
+    .join("\n")
+    .slice(0, 12000);
+}
+
+function extractHtmlTitle(html) {
+  const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  return match ? decodeHtml(match[1]) : "";
+}
+
+function extractMetaContent(html, name) {
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const patterns = [
+    new RegExp(`<meta[^>]+(?:name|property)=["']${escapedName}["'][^>]+content=["']([^"']*)["'][^>]*>`, "i"),
+    new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+(?:name|property)=["']${escapedName}["'][^>]*>`, "i")
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match) return decodeHtml(match[1]);
+  }
+
+  return "";
+}
+
+function extractJsonLdSummaries(html) {
+  const matches = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  const summaries = [];
+
+  for (const match of matches) {
+    try {
+      const parsed = JSON.parse(match[1].trim());
+      const items = Array.isArray(parsed) ? parsed : [parsed];
+      for (const item of items) {
+        summaries.push(jsonLdSummary(item));
+      }
+    } catch {
+      // Ignore malformed embedded metadata.
+    }
+  }
+
+  return summaries;
+}
+
+function jsonLdSummary(item) {
+  if (!item || typeof item !== "object") return "";
+  const fields = [
+    item.name,
+    item.description,
+    item.startDate,
+    item.endDate,
+    item.location?.name,
+    item.location?.address?.streetAddress,
+    item.location?.address?.addressLocality,
+    item.location?.address?.addressCountry
+  ];
+  return uniqueNonEmpty(fields).join("\n");
+}
+
+function uniqueNonEmpty(values) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+function decodeHtml(value) {
+  return String(value)
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 async function enrichEventWithOpenAI(event) {
   if (!config.openaiApiKey) return;
 
   try {
-    const extracted = await extractEventWithOpenAI(event.rawText);
+    const extracted = await extractEventWithOpenAI(event.sourceText || event.rawText);
     if (extracted.title) event.title = extracted.title.slice(0, 120);
     if (extracted.url) event.url = extracted.url;
     if (extracted.location) event.location = extracted.location;
@@ -814,6 +934,7 @@ function fromSupabaseEvent(row) {
     title: row.title,
     url: row.url || "",
     rawText: row.raw_text || "",
+    sourceText: row.raw_text || "",
     location: row.location,
     eventType: row.event_type,
     startsAt: row.starts_at,
