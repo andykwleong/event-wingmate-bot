@@ -11,6 +11,8 @@ const config = {
   timezone: env.DEFAULT_TIMEZONE || "Asia/Singapore",
   allowedUserId: env.ALLOWED_USER_ID || "",
   dataFile: env.DATA_FILE || "./data/events.json",
+  supabaseUrl: env.SUPABASE_URL || "",
+  supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY || "",
   port: Number(env.PORT || 3000)
 };
 
@@ -20,13 +22,14 @@ if (!config.token) {
 }
 
 const apiBase = `https://api.telegram.org/bot${config.token}`;
+const useSupabase = Boolean(config.supabaseUrl && config.supabaseServiceRoleKey);
 let lastUpdateId = 0;
 const sentReminderKeys = new Set();
 
-await ensureDataFile();
+await initializeStorage();
 startHealthServer();
 scheduleReminderLoop();
-console.log("Event Wingmate bot is running.");
+console.log(`Event Wingmate bot is running with ${useSupabase ? "Supabase" : "local file"} storage.`);
 await pollForever();
 
 function loadEnv() {
@@ -125,10 +128,8 @@ async function handleMessage(message) {
     return;
   }
 
-  const event = parseEvent(text, chatId);
-  const events = await readEvents();
-  events.push(event);
-  await writeEvents(events);
+  const event = parseEvent(text, chatId, userId);
+  await saveEvent(event);
 
   await sendMessage(chatId, eventPrepMessage(event), {
     disable_web_page_preview: true
@@ -150,7 +151,7 @@ async function isAllowedUser(userId, text) {
   return false;
 }
 
-function parseEvent(text, chatId) {
+function parseEvent(text, chatId, userId) {
   const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
   const lumaUrl = text.match(/https?:\/\/(?:lu\.ma|luma\.com)\/\S+/i)?.[0];
   const url = lumaUrl || text.match(/https?:\/\/\S+/i)?.[0] || "";
@@ -163,12 +164,14 @@ function parseEvent(text, chatId) {
   return {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     chatId,
+    userId,
     title,
     url,
     rawText: text,
     location,
     eventType,
     startsAt,
+    deleteAfter: deleteAfterFor(startsAt),
     createdAt: new Date().toISOString(),
     reminders: {
       dayBefore: false,
@@ -176,6 +179,12 @@ function parseEvent(text, chatId) {
       networking: false
     }
   };
+}
+
+function deleteAfterFor(startsAt) {
+  const date = new Date(startsAt);
+  date.setDate(date.getDate() + 2);
+  return date.toISOString();
 }
 
 function extractTitle(lines, url) {
@@ -349,12 +358,12 @@ function settingsMessage(userId) {
     `Timezone: ${config.timezone}`,
     `Your Telegram user ID: ${userId}`,
     `Locked to user ID: ${config.allowedUserId || "first /start user"}`,
-    `Storage: ${config.dataFile}`
+    `Storage: ${useSupabase ? "Supabase" : config.dataFile}`
   ].join("\n");
 }
 
 async function eventsMessage(chatId) {
-  const events = (await readEvents()).filter((event) => event.chatId === chatId);
+  const events = await readEventsForChat(chatId);
   if (events.length === 0) return "No events saved yet. Paste a Luma link or event text to add one.";
 
   return events
@@ -374,7 +383,8 @@ function scheduleReminderLoop() {
 }
 
 async function sendDueReminders() {
-  const events = await readEvents();
+  await deleteExpiredEvents();
+  const events = await readUpcomingEvents();
   const now = Date.now();
   let changed = false;
 
@@ -411,7 +421,7 @@ async function sendDueReminders() {
     }
   }
 
-  if (changed) await writeEvents(events);
+  if (changed) await updateEvents(events);
 }
 
 function dayBeforeMessage(event) {
@@ -466,6 +476,11 @@ async function sendMessage(chatId, text, options = {}) {
   });
 }
 
+async function initializeStorage() {
+  if (useSupabase) return;
+  await ensureDataFile();
+}
+
 async function ensureDataFile() {
   await fs.mkdir(path.dirname(config.dataFile), { recursive: true });
   try {
@@ -476,6 +491,11 @@ async function ensureDataFile() {
 }
 
 async function readOwnerId() {
+  if (useSupabase) {
+    const owners = await supabaseRequest("/rest/v1/bot_owners?select=telegram_user_id&order=created_at.asc&limit=1");
+    return owners[0]?.telegram_user_id || "";
+  }
+
   try {
     const ownerFile = ownerFilePath();
     return (await fs.readFile(ownerFile, "utf8")).trim();
@@ -485,6 +505,15 @@ async function readOwnerId() {
 }
 
 async function writeOwnerId(userId) {
+  if (useSupabase) {
+    await supabaseRequest("/rest/v1/bot_owners", {
+      method: "POST",
+      body: [{ telegram_user_id: userId }],
+      headers: { prefer: "resolution=ignore-duplicates" }
+    });
+    return;
+  }
+
   const ownerFile = ownerFilePath();
   await fs.mkdir(path.dirname(ownerFile), { recursive: true });
   await fs.writeFile(ownerFile, `${userId}\n`, "utf8");
@@ -502,6 +531,137 @@ async function readEvents() {
 async function writeEvents(events) {
   await fs.mkdir(path.dirname(config.dataFile), { recursive: true });
   await fs.writeFile(config.dataFile, `${JSON.stringify(events, null, 2)}\n`, "utf8");
+}
+
+async function saveEvent(event) {
+  if (useSupabase) {
+    await supabaseRequest("/rest/v1/events", {
+      method: "POST",
+      body: [toSupabaseEvent(event)]
+    });
+    return;
+  }
+
+  const events = await readEvents();
+  events.push(event);
+  await writeEvents(events);
+}
+
+async function readEventsForChat(chatId) {
+  if (useSupabase) {
+    const query = new URLSearchParams({
+      select: "*",
+      telegram_chat_id: `eq.${chatId}`,
+      order: "starts_at.asc",
+      limit: "10"
+    });
+    const rows = await supabaseRequest(`/rest/v1/events?${query.toString()}`);
+    return rows.map(fromSupabaseEvent);
+  }
+
+  return (await readEvents()).filter((event) => event.chatId === chatId);
+}
+
+async function readUpcomingEvents() {
+  if (useSupabase) {
+    const query = new URLSearchParams({
+      select: "*",
+      starts_at: `gte.${new Date(Date.now() - 60 * 60 * 1000).toISOString()}`,
+      order: "starts_at.asc"
+    });
+    const rows = await supabaseRequest(`/rest/v1/events?${query.toString()}`);
+    return rows.map(fromSupabaseEvent);
+  }
+
+  return readEvents();
+}
+
+async function updateEvents(events) {
+  if (useSupabase) {
+    for (const event of events) {
+      await supabaseRequest(`/rest/v1/events?id=eq.${encodeURIComponent(event.id)}`, {
+        method: "PATCH",
+        body: {
+          reminders: event.reminders
+        }
+      });
+    }
+    return;
+  }
+
+  await writeEvents(events);
+}
+
+async function deleteExpiredEvents() {
+  if (useSupabase) {
+    await supabaseRequest(`/rest/v1/events?delete_after=lt.${encodeURIComponent(new Date().toISOString())}`, {
+      method: "DELETE"
+    });
+    return;
+  }
+
+  const events = await readEvents();
+  const activeEvents = events.filter((event) => {
+    const deleteAfter = event.deleteAfter || deleteAfterFor(event.startsAt);
+    return new Date(deleteAfter).getTime() > Date.now();
+  });
+  if (activeEvents.length !== events.length) await writeEvents(activeEvents);
+}
+
+async function supabaseRequest(pathname, options = {}) {
+  const response = await fetch(`${config.supabaseUrl}${pathname}`, {
+    method: options.method || "GET",
+    headers: {
+      apikey: config.supabaseServiceRoleKey,
+      authorization: `Bearer ${config.supabaseServiceRoleKey}`,
+      "content-type": "application/json",
+      ...(options.headers || {})
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Supabase request failed: ${response.status} ${body}`);
+  }
+
+  if (response.status === 204) return null;
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
+}
+
+function toSupabaseEvent(event) {
+  return {
+    id: event.id,
+    telegram_chat_id: event.chatId,
+    telegram_user_id: event.userId,
+    title: event.title,
+    url: event.url || null,
+    raw_text: event.rawText,
+    location: event.location,
+    event_type: event.eventType,
+    starts_at: event.startsAt,
+    reminders: event.reminders,
+    created_at: event.createdAt,
+    delete_after: event.deleteAfter
+  };
+}
+
+function fromSupabaseEvent(row) {
+  return {
+    id: row.id,
+    chatId: row.telegram_chat_id,
+    userId: row.telegram_user_id,
+    title: row.title,
+    url: row.url || "",
+    rawText: row.raw_text || "",
+    location: row.location,
+    eventType: row.event_type,
+    startsAt: row.starts_at,
+    reminders: row.reminders || {},
+    createdAt: row.created_at,
+    deleteAfter: row.delete_after
+  };
 }
 
 function formatDateTime(isoString) {

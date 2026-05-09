@@ -33,6 +33,8 @@ HOME_ADDRESS=your usual starting address
 DEFAULT_TIMEZONE=Asia/Singapore
 ALLOWED_USER_ID=your_telegram_user_id
 DATA_FILE=./data/events.json
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_secret_or_service_role_key
 ```
 
 4. Set the start command to:
@@ -47,7 +49,9 @@ npm start
 Event Wingmate bot is running.
 ```
 
-This deployable version still uses local JSON storage. That is fine for the next test, but the next production step is moving event storage to Supabase so reminders survive restarts and old events can be deleted automatically.
+If `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present, the bot stores owners and events in Supabase. Without them, it falls back to local JSON storage for testing.
+
+Past events are deleted automatically two days after they start.
 
 ## Locking the Bot
 
