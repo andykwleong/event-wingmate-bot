@@ -13,6 +13,8 @@ const config = {
   dataFile: env.DATA_FILE || "./data/events.json",
   supabaseUrl: env.SUPABASE_URL || "",
   supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY || "",
+  openaiApiKey: env.OPENAI_API_KEY || "",
+  openaiModel: env.OPENAI_MODEL || "gpt-5.4-mini",
   port: Number(env.PORT || 3000)
 };
 
@@ -129,6 +131,7 @@ async function handleMessage(message) {
   }
 
   const event = parseEvent(text, chatId, userId);
+  await enrichEventWithOpenAI(event);
   await saveEvent(event);
 
   await sendMessage(chatId, eventPrepMessage(event), {
@@ -171,6 +174,10 @@ function parseEvent(text, chatId, userId) {
     location,
     eventType,
     startsAt,
+    summary: "",
+    audience: "",
+    networkingAt: null,
+    prep: null,
     deleteAfter: deleteAfterFor(startsAt),
     createdAt: new Date().toISOString(),
     reminders: {
@@ -179,6 +186,141 @@ function parseEvent(text, chatId, userId) {
       networking: false
     }
   };
+}
+
+async function enrichEventWithOpenAI(event) {
+  if (!config.openaiApiKey) return;
+
+  try {
+    const extracted = await extractEventWithOpenAI(event.rawText);
+    if (extracted.title) event.title = extracted.title.slice(0, 120);
+    if (extracted.url) event.url = extracted.url;
+    if (extracted.location) event.location = extracted.location;
+    if (extracted.eventType) event.eventType = extracted.eventType;
+    if (extracted.startsAtIso) {
+      const startsAt = new Date(extracted.startsAtIso);
+      if (!Number.isNaN(startsAt.getTime())) {
+        event.startsAt = startsAt.toISOString();
+        event.deleteAfter = deleteAfterFor(event.startsAt);
+      }
+    }
+    if (extracted.networkingAtIso) {
+      const networkingAt = new Date(extracted.networkingAtIso);
+      if (!Number.isNaN(networkingAt.getTime())) event.networkingAt = networkingAt.toISOString();
+    }
+    event.summary = extracted.summary || "";
+    event.audience = extracted.audience || "";
+    event.prep = {
+      conversationStarters: extracted.conversationStarters || [],
+      talkingPoints: extracted.talkingPoints || [],
+      socialMission: extracted.socialMission || "",
+      encouragement: extracted.encouragement || "",
+      missingInfo: extracted.missingInfo || []
+    };
+  } catch (error) {
+    console.error("OpenAI extraction failed, using rule-based parser:", error.message);
+  }
+}
+
+async function extractEventWithOpenAI(rawText) {
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      title: { type: "string" },
+      url: { type: "string" },
+      startsAtIso: { type: "string" },
+      location: { type: "string" },
+      eventType: {
+        type: "string",
+        enum: ["startup", "tech", "product/design", "networking", "workshop", "arts/culture", "wellness", "general"]
+      },
+      summary: { type: "string" },
+      audience: { type: "string" },
+      networkingAtIso: { type: "string" },
+      conversationStarters: {
+        type: "array",
+        items: { type: "string" }
+      },
+      talkingPoints: {
+        type: "array",
+        items: { type: "string" }
+      },
+      socialMission: { type: "string" },
+      encouragement: { type: "string" },
+      missingInfo: {
+        type: "array",
+        items: { type: "string" }
+      }
+    },
+    required: [
+      "title",
+      "url",
+      "startsAtIso",
+      "location",
+      "eventType",
+      "summary",
+      "audience",
+      "networkingAtIso",
+      "conversationStarters",
+      "talkingPoints",
+      "socialMission",
+      "encouragement",
+      "missingInfo"
+    ]
+  };
+
+  const today = new Intl.DateTimeFormat("en-CA", {
+    dateStyle: "full",
+    timeZone: config.timezone
+  }).format(new Date());
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.openaiApiKey}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      model: config.openaiModel,
+      input: [
+        {
+          role: "system",
+          content: [
+            "You extract event details for a private Telegram event companion.",
+            `Assume the user's timezone is ${config.timezone}. Today's date is ${today}.`,
+            "Return empty strings for unknown text fields and empty arrays for unknown lists.",
+            "For dates, return ISO 8601 strings with timezone offset when the event text provides enough information. If date or time is missing, return an empty string.",
+            "Make introvert-friendly suggestions practical, specific, and low-pressure. Avoid generic hype."
+          ].join(" ")
+        },
+        {
+          role: "user",
+          content: rawText
+        }
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "event_intake",
+          strict: true,
+          schema
+        }
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`OpenAI request failed: ${response.status} ${body}`);
+  }
+
+  const data = await response.json();
+  const outputText = data.output_text || data.output?.flatMap((item) => item.content || [])
+    .find((content) => content.type === "output_text")?.text;
+
+  if (!outputText) throw new Error("OpenAI response did not include output_text.");
+  return JSON.parse(outputText);
 }
 
 function deleteAfterFor(startsAt) {
@@ -257,8 +399,10 @@ function matchesAny(text, terms) {
 function eventPrepMessage(event) {
   const transitUrl = mapsUrl(config.homeAddress, event.location, "transit");
   const drivingUrl = mapsUrl(config.homeAddress, event.location, "driving");
-  const talkingPoints = talkingPointsFor(event.eventType);
+  const talkingPoints = event.prep?.talkingPoints?.length ? event.prep.talkingPoints : talkingPointsFor(event.eventType);
+  const conversationStarters = event.prep?.conversationStarters || [];
   const starts = formatDateTime(event.startsAt);
+  const missingInfo = event.prep?.missingInfo || [];
 
   return [
     `Saved: ${event.title}`,
@@ -266,17 +410,25 @@ function eventPrepMessage(event) {
     `When: ${starts}`,
     `Where: ${event.location}`,
     `Type: ${event.eventType}`,
+    event.summary ? `Summary: ${event.summary}` : "",
+    event.audience ? `Likely crowd: ${event.audience}` : "",
     event.url ? `Link: ${event.url}` : "",
+    missingInfo.length ? `Missing: ${missingInfo.join(", ")}` : "",
     "",
     "Getting there:",
     `Public transport: ${transitUrl}`,
     `Car: ${drivingUrl}`,
     "",
+    conversationStarters.length ? "Easy openers:" : "",
+    ...conversationStarters.slice(0, 3).map((point) => `- ${point}`),
+    conversationStarters.length ? "" : "",
     "Your introvert prep:",
     ...talkingPoints.map((point) => `- ${point}`),
     "",
     "Tiny mission:",
-    "Talk to one person before checking your phone. Ask one follow-up question. That counts."
+    event.prep?.socialMission || "Talk to one person before checking your phone. Ask one follow-up question. That counts.",
+    "",
+    event.prep?.encouragement || ""
   ].filter(Boolean).join("\n");
 }
 
@@ -403,7 +555,7 @@ async function sendDueReminders() {
       },
       {
         key: "networking",
-        dueAt: startsAt + 30 * 60 * 1000,
+        dueAt: event.networkingAt ? new Date(event.networkingAt).getTime() : startsAt + 30 * 60 * 1000,
         message: networkingMessage(event)
       }
     ];
@@ -425,6 +577,7 @@ async function sendDueReminders() {
 }
 
 function dayBeforeMessage(event) {
+  const opener = event.prep?.conversationStarters?.[0] || talkingPointsFor(event.eventType)[0];
   return [
     `Tomorrow: ${event.title}`,
     "",
@@ -432,7 +585,7 @@ function dayBeforeMessage(event) {
     `Public transport: ${mapsUrl(config.homeAddress, event.location, "transit")}`,
     "",
     "Pick one opener now so your future self has less to carry:",
-    talkingPointsFor(event.eventType)[0]
+    opener
   ].join("\n");
 }
 
@@ -446,10 +599,12 @@ function leaveTimeMessage(event) {
 }
 
 function networkingMessage(event) {
+  const encouragement = event.prep?.encouragement || "You are already there. The hard part is done.";
+  const mission = event.prep?.socialMission || "Say hi to one person, ask what brought them here, and stay for one honest answer.";
   return [
     "Networking time.",
     "",
-    "You are already there. The hard part is done. Say hi to one person, ask what brought them here, and stay for one honest answer."
+    `${encouragement} ${mission}`
   ].join("\n");
 }
 
@@ -641,6 +796,10 @@ function toSupabaseEvent(event) {
     location: event.location,
     event_type: event.eventType,
     starts_at: event.startsAt,
+    summary: event.summary || null,
+    audience: event.audience || null,
+    networking_at: event.networkingAt || null,
+    prep: event.prep || {},
     reminders: event.reminders,
     created_at: event.createdAt,
     delete_after: event.deleteAfter
@@ -658,6 +817,10 @@ function fromSupabaseEvent(row) {
     location: row.location,
     eventType: row.event_type,
     startsAt: row.starts_at,
+    summary: row.summary || "",
+    audience: row.audience || "",
+    networkingAt: row.networking_at || null,
+    prep: row.prep || null,
     reminders: row.reminders || {},
     createdAt: row.created_at,
     deleteAfter: row.delete_after
