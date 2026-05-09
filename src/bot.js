@@ -197,7 +197,7 @@ function parseEvent(text, chatId, userId) {
 
 async function enrichEventWithTravel(event) {
   if (!config.googleMapsApiKey) return;
-  if (!hasSpecificLocation(event.location)) return;
+  if (!shouldRouteToEventLocation(event)) return;
 
   const departureTime = recommendedDepartureDate(event.startsAt);
   const travel = {};
@@ -334,12 +334,32 @@ async function fetchEventPageText(url) {
     extractMetaContent(html, "og:title"),
     extractMetaContent(html, "og:description"),
     extractMetaContent(html, "og:site_name"),
+    ...extractGoogleMapsDestinations(html),
     ...extractJsonLdSummaries(html)
   ];
 
   return uniqueNonEmpty(pieces)
     .join("\n")
     .slice(0, 12000);
+}
+
+function extractGoogleMapsDestinations(html) {
+  return [...html.matchAll(/https?:\/\/[^"'<>\\\s]*google[^"'<>\\\s]*/gi)]
+    .map((match) => decodeHtml(match[0]))
+    .map((url) => extractGoogleMapsDestination(url))
+    .filter(Boolean)
+    .map((destination) => `Google Maps destination: ${destination}`);
+}
+
+function extractGoogleMapsDestination(url) {
+  try {
+    const parsed = new URL(url);
+    const query = parsed.searchParams.get("query");
+    const center = parsed.searchParams.get("center");
+    return query || center || "";
+  } catch {
+    return "";
+  }
 }
 
 function extractHtmlTitle(html) {
@@ -391,7 +411,13 @@ function jsonLdSummary(item) {
     item.location?.name,
     item.location?.address?.streetAddress,
     item.location?.address?.addressLocality,
-    item.location?.address?.addressCountry
+    item.location?.address?.addressCountry,
+    item.location?.geo?.latitude && item.location?.geo?.longitude
+      ? `Coordinates: ${item.location.geo.latitude},${item.location.geo.longitude}`
+      : "",
+    item.location?.latitude && item.location?.longitude
+      ? `Coordinates: ${item.location.latitude},${item.location.longitude}`
+      : ""
   ];
   return uniqueNonEmpty(fields).join("\n");
 }
@@ -519,6 +545,9 @@ async function extractEventWithOpenAI(rawText) {
             `Assume the user's timezone is ${config.timezone}. Today's date is ${today}.`,
             "Return empty strings for unknown text fields and empty arrays for unknown lists.",
             "For location, only return a specific venue name, building, street address, or clearly routable place. Do not return only a city, country, region, or vague value like Singapore, Online, TBA, TBD, or venue to be announced.",
+            "Do not infer the venue from prose like 'landing at AI Engineer Singapore' unless the text explicitly labels it as a venue/location/address or structured event metadata gives a specific Place/address.",
+            "If fetched details include 'Google Maps destination:' or 'Coordinates:', use that exact coordinate pair as the location.",
+            "If the event only exposes a city-level location and no coordinates or maps destination, put venue/address in missingInfo and return an empty location.",
             "For dates, return ISO 8601 strings with timezone offset when the event text provides enough information. If date or time is missing, return an empty string.",
             "Make introvert-friendly suggestions practical, specific, and low-pressure. Avoid generic hype."
           ].join(" ")
@@ -571,9 +600,20 @@ function extractLocation(lines, text) {
   if (labelled) return labelled.split(":").slice(1).join(":").trim();
 
   const atMatch = text.match(/\bat\s+([^.\n]+(?:street|road|avenue|ave|centre|center|hub|hall|hotel|office|sg|singapore)[^.\n]*)/i);
-  if (atMatch) return atMatch[1].trim();
+  if (atMatch) {
+    const candidate = atMatch[1].trim();
+    if (hasSpecificLocation(candidate)) return candidate;
+  }
 
   return "Venue to confirm";
+}
+
+function shouldRouteToEventLocation(event) {
+  return hasSpecificLocation(event.location) && (!hasMissingLocationInfo(event.prep?.missingInfo) || isCoordinateLocation(event.location));
+}
+
+function hasMissingLocationInfo(missingInfo = []) {
+  return missingInfo.some((item) => /\b(location|venue|address|street)\b/i.test(String(item)));
 }
 
 function hasSpecificLocation(location) {
@@ -596,10 +636,17 @@ function hasSpecificLocation(location) {
   ]);
 
   if (vagueLocations.has(normalized)) return false;
+  if (isCoordinateLocation(location)) return true;
   if (/^(singapore|sg)[\s,.]*$/i.test(location)) return false;
   if (/\b(tba|tbd|to be announced|to be confirmed)\b/i.test(location)) return false;
+  if (/\b(we'?re|we are|throwing|landing at|bring your|free boba|free coffee|sync-up|meetup|event)\b/i.test(location)) return false;
+  if (location.length > 90 && !/\d/.test(location)) return false;
 
-  return /[0-9]|,|\b(street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd|way|place|plaza|tower|centre|center|hub|hall|hotel|office|building|mall|museum|gallery|campus|library|theatre|theater|auditorium|cafe|restaurant|studio|club|school|university|polytechnic|college|national|marina|raffles|orchard|bugis|tanjong|pagar|one-north|city hall|chinatown|sentosa)\b/i.test(location);
+  return /[0-9]|\b(street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd|way|place|plaza|tower|centre|center|hub|hall|hotel|office|building|mall|museum|gallery|campus|library|theatre|theater|auditorium|cafe|restaurant|studio|club|school|university|polytechnic|college|national|marina|raffles|orchard|bugis|tanjong|pagar|one-north|city hall|chinatown|sentosa)\b/i.test(location);
+}
+
+function isCoordinateLocation(location) {
+  return /^-?\d{1,3}(?:\.\d+)?\s*,\s*-?\d{1,3}(?:\.\d+)?$/.test(String(location || "").trim());
 }
 
 function extractDate(text) {
@@ -652,7 +699,7 @@ function matchesAny(text, terms) {
 }
 
 function eventPrepMessage(event) {
-  const canRoute = hasSpecificLocation(event.location);
+  const canRoute = shouldRouteToEventLocation(event);
   const transitUrl = canRoute ? mapsUrl(config.homeAddress, event.location, "transit") : "";
   const drivingUrl = canRoute ? mapsUrl(config.homeAddress, event.location, "driving") : "";
   const talkingPoints = event.prep?.talkingPoints?.length ? event.prep.talkingPoints : talkingPointsFor(event.eventType);
@@ -688,7 +735,7 @@ function eventPrepMessage(event) {
 }
 
 function travelLines(event, transitUrl, drivingUrl) {
-  if (!hasSpecificLocation(event.location)) {
+  if (!shouldRouteToEventLocation(event)) {
     return [
       "Travel time: not available yet",
       "Reason: this event does not have a specific venue/address yet."
@@ -882,7 +929,7 @@ async function sendDueReminders() {
 
 function dayBeforeMessage(event) {
   const opener = event.prep?.conversationStarters?.[0] || talkingPointsFor(event.eventType)[0];
-  const transitLine = !hasSpecificLocation(event.location)
+  const transitLine = !shouldRouteToEventLocation(event)
     ? "Travel time: not available yet because the venue is not specific."
     : event.travel?.transit
     ? `Public transport: ${formatDuration(event.travel.transit.durationSeconds)}${leaveByText(event.startsAt, event.travel.transit.durationSeconds)}`
@@ -900,7 +947,7 @@ function dayBeforeMessage(event) {
 
 function leaveTimeMessage(event) {
   const transitDuration = event.travel?.transit?.durationSeconds;
-  if (!hasSpecificLocation(event.location)) {
+  if (!shouldRouteToEventLocation(event)) {
     return [
       `Venue still missing for ${event.title}.`,
       "",
