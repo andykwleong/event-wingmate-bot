@@ -37,6 +37,7 @@ SUPABASE_URL=your_supabase_project_url
 SUPABASE_SERVICE_ROLE_KEY=your_supabase_secret_or_service_role_key
 OPENAI_API_KEY=your_openai_api_key
 OPENAI_MODEL=gpt-5.4-mini
+GOOGLE_MAPS_API_KEY=your_google_maps_routes_api_key
 ```
 
 4. Set the start command to:
@@ -54,6 +55,8 @@ Event Wingmate bot is running.
 If `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present, the bot stores owners and events in Supabase. Without them, it falls back to local JSON storage for testing.
 
 If `OPENAI_API_KEY` is present, the bot uses OpenAI Structured Outputs to extract event details and generate introvert-friendly prep. Without it, it falls back to the simple rule-based parser.
+
+If `GOOGLE_MAPS_API_KEY` is present, the bot uses Google Routes API to calculate transit and driving travel times. Without it, it falls back to Google Maps links.
 
 Past events are deleted automatically two days after they start.
 

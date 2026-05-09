@@ -15,6 +15,7 @@ const config = {
   supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY || "",
   openaiApiKey: env.OPENAI_API_KEY || "",
   openaiModel: env.OPENAI_MODEL || "gpt-5.4-mini",
+  googleMapsApiKey: env.GOOGLE_MAPS_API_KEY || "",
   port: Number(env.PORT || 3000)
 };
 
@@ -135,6 +136,7 @@ async function handleMessage(message) {
   event.rawText = text;
   event.sourceText = enrichedText;
   await enrichEventWithOpenAI(event);
+  await enrichEventWithTravel(event);
   await saveEvent(event);
 
   await sendMessage(chatId, eventPrepMessage(event), {
@@ -182,6 +184,7 @@ function parseEvent(text, chatId, userId) {
     audience: "",
     networkingAt: null,
     prep: null,
+    travel: null,
     deleteAfter: deleteAfterFor(startsAt),
     createdAt: new Date().toISOString(),
     reminders: {
@@ -190,6 +193,107 @@ function parseEvent(text, chatId, userId) {
       networking: false
     }
   };
+}
+
+async function enrichEventWithTravel(event) {
+  if (!config.googleMapsApiKey) return;
+  if (!event.location || event.location === "Venue to confirm") return;
+
+  const departureTime = recommendedDepartureDate(event.startsAt);
+  const travel = {};
+
+  try {
+    travel.transit = await computeRoute({
+      origin: config.homeAddress,
+      destination: event.location,
+      mode: "TRANSIT",
+      departureTime
+    });
+  } catch (error) {
+    console.error("Transit route failed:", error.message);
+  }
+
+  try {
+    travel.driving = await computeRoute({
+      origin: config.homeAddress,
+      destination: event.location,
+      mode: "DRIVE",
+      departureTime
+    });
+  } catch (error) {
+    console.error("Driving route failed:", error.message);
+  }
+
+  if (travel.transit || travel.driving) event.travel = travel;
+}
+
+function recommendedDepartureDate(startsAt) {
+  const start = new Date(startsAt);
+  const departure = new Date(start.getTime() - 60 * 60 * 1000);
+  return departure > new Date() ? departure : new Date(Date.now() + 10 * 60 * 1000);
+}
+
+async function computeRoute({ origin, destination, mode, departureTime }) {
+  const response = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-goog-api-key": config.googleMapsApiKey,
+      "x-goog-fieldmask": "routes.duration,routes.distanceMeters,routes.legs.steps.transitDetails,routes.legs.steps.navigationInstruction,routes.legs.steps.localizedValues"
+    },
+    body: JSON.stringify({
+      origin: { address: origin },
+      destination: { address: destination },
+      travelMode: mode,
+      routingPreference: mode === "DRIVE" ? "TRAFFIC_AWARE" : undefined,
+      departureTime: departureTime.toISOString(),
+      computeAlternativeRoutes: false,
+      languageCode: "en",
+      units: "METRIC"
+    })
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Google Routes request failed: ${response.status} ${body}`);
+  }
+
+  const data = await response.json();
+  const route = data.routes?.[0];
+  if (!route) throw new Error("Google Routes returned no route.");
+
+  return {
+    durationSeconds: parseDurationSeconds(route.duration),
+    distanceMeters: route.distanceMeters || null,
+    summary: summarizeRoute(route, mode)
+  };
+}
+
+function parseDurationSeconds(duration) {
+  if (!duration) return null;
+  const match = String(duration).match(/^(\d+)s$/);
+  return match ? Number(match[1]) : null;
+}
+
+function summarizeRoute(route, mode) {
+  const steps = route.legs?.flatMap((leg) => leg.steps || []) || [];
+  if (mode === "TRANSIT") {
+    const transitSteps = steps
+      .map((step) => step.transitDetails)
+      .filter(Boolean)
+      .map((details) => {
+        const line = details.transitLine?.nameShort || details.transitLine?.name || "transit";
+        const stop = details.stopDetails?.departureStop?.name;
+        return stop ? `${line} from ${stop}` : line;
+      });
+    return transitSteps.slice(0, 3).join(" -> ");
+  }
+
+  return steps
+    .map((step) => step.navigationInstruction?.instructions)
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(" -> ");
 }
 
 async function enrichTextWithLinkedPage(text) {
@@ -536,8 +640,7 @@ function eventPrepMessage(event) {
     missingInfo.length ? `Missing: ${missingInfo.join(", ")}` : "",
     "",
     "Getting there:",
-    `Public transport: ${transitUrl}`,
-    `Car: ${drivingUrl}`,
+    ...travelLines(event, transitUrl, drivingUrl),
     "",
     conversationStarters.length ? "Easy openers:" : "",
     ...conversationStarters.slice(0, 3).map((point) => `- ${point}`),
@@ -550,6 +653,48 @@ function eventPrepMessage(event) {
     "",
     event.prep?.encouragement || ""
   ].filter(Boolean).join("\n");
+}
+
+function travelLines(event, transitUrl, drivingUrl) {
+  if (!event.travel?.transit && !event.travel?.driving) {
+    return [
+      `Public transport: ${transitUrl}`,
+      `Car: ${drivingUrl}`
+    ];
+  }
+
+  const lines = [];
+  if (event.travel?.transit) {
+    lines.push(`Public transport: ${formatDuration(event.travel.transit.durationSeconds)}${leaveByText(event.startsAt, event.travel.transit.durationSeconds)}`);
+    if (event.travel.transit.summary) lines.push(`Route: ${event.travel.transit.summary}`);
+  } else {
+    lines.push(`Public transport: ${transitUrl}`);
+  }
+
+  if (event.travel?.driving) {
+    lines.push(`Car: ${formatDuration(event.travel.driving.durationSeconds)}${leaveByText(event.startsAt, event.travel.driving.durationSeconds)}`);
+  } else {
+    lines.push(`Car: ${drivingUrl}`);
+  }
+
+  lines.push(`Open in Maps: ${transitUrl}`);
+  return lines;
+}
+
+function leaveByText(startsAt, durationSeconds) {
+  if (!durationSeconds) return "";
+  const bufferMinutes = 15;
+  const leaveAt = new Date(new Date(startsAt).getTime() - durationSeconds * 1000 - bufferMinutes * 60 * 1000);
+  return `, leave by ${formatTime(leaveAt)}`;
+}
+
+function formatDuration(seconds) {
+  if (!seconds) return "time unavailable";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours} hr ${remainingMinutes} min` : `${hours} hr`;
 }
 
 function talkingPointsFor(eventType) {
@@ -698,11 +843,14 @@ async function sendDueReminders() {
 
 function dayBeforeMessage(event) {
   const opener = event.prep?.conversationStarters?.[0] || talkingPointsFor(event.eventType)[0];
+  const transitLine = event.travel?.transit
+    ? `Public transport: ${formatDuration(event.travel.transit.durationSeconds)}${leaveByText(event.startsAt, event.travel.transit.durationSeconds)}`
+    : `Public transport: ${mapsUrl(config.homeAddress, event.location, "transit")}`;
   return [
     `Tomorrow: ${event.title}`,
     "",
     `Venue: ${event.location}`,
-    `Public transport: ${mapsUrl(config.homeAddress, event.location, "transit")}`,
+    transitLine,
     "",
     "Pick one opener now so your future self has less to carry:",
     opener
@@ -710,10 +858,11 @@ function dayBeforeMessage(event) {
 }
 
 function leaveTimeMessage(event) {
+  const transitDuration = event.travel?.transit?.durationSeconds;
   return [
     `Leave soon for ${event.title}.`,
     "",
-    "Check the route now, give yourself breathing room, and arrive as the person who planned this nicely.",
+    transitDuration ? `Public transport should take about ${formatDuration(transitDuration)}. Give yourself breathing room and arrive as the person who planned this nicely.` : "Check the route now, give yourself breathing room, and arrive as the person who planned this nicely.",
     mapsUrl(config.homeAddress, event.location, "transit")
   ].join("\n");
 }
@@ -920,6 +1069,7 @@ function toSupabaseEvent(event) {
     audience: event.audience || null,
     networking_at: event.networkingAt || null,
     prep: event.prep || {},
+    travel: event.travel || {},
     reminders: event.reminders,
     created_at: event.createdAt,
     delete_after: event.deleteAfter
@@ -942,6 +1092,7 @@ function fromSupabaseEvent(row) {
     audience: row.audience || "",
     networkingAt: row.networking_at || null,
     prep: row.prep || null,
+    travel: row.travel || null,
     reminders: row.reminders || {},
     createdAt: row.created_at,
     deleteAfter: row.delete_after
@@ -954,6 +1105,13 @@ function formatDateTime(isoString) {
     timeStyle: "short",
     timeZone: config.timezone
   }).format(new Date(isoString));
+}
+
+function formatTime(date) {
+  return new Intl.DateTimeFormat("en-SG", {
+    timeStyle: "short",
+    timeZone: config.timezone
+  }).format(date);
 }
 
 function sleep(ms) {
