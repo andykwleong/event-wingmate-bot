@@ -197,7 +197,7 @@ function parseEvent(text, chatId, userId) {
 
 async function enrichEventWithTravel(event) {
   if (!config.googleMapsApiKey) return;
-  if (!event.location || event.location === "Venue to confirm") return;
+  if (!hasSpecificLocation(event.location)) return;
 
   const departureTime = recommendedDepartureDate(event.startsAt);
   const travel = {};
@@ -419,7 +419,11 @@ async function enrichEventWithOpenAI(event) {
     const extracted = await extractEventWithOpenAI(event.sourceText || event.rawText);
     if (extracted.title) event.title = extracted.title.slice(0, 120);
     if (extracted.url) event.url = extracted.url;
-    if (extracted.location) event.location = extracted.location;
+    if (hasSpecificLocation(extracted.location)) {
+      event.location = extracted.location;
+    } else if (!hasSpecificLocation(event.location)) {
+      event.location = "Venue to confirm";
+    }
     if (extracted.eventType) event.eventType = extracted.eventType;
     if (extracted.startsAtIso) {
       const startsAt = new Date(extracted.startsAtIso);
@@ -514,6 +518,7 @@ async function extractEventWithOpenAI(rawText) {
             "You extract event details for a private Telegram event companion.",
             `Assume the user's timezone is ${config.timezone}. Today's date is ${today}.`,
             "Return empty strings for unknown text fields and empty arrays for unknown lists.",
+            "For location, only return a specific venue name, building, street address, or clearly routable place. Do not return only a city, country, region, or vague value like Singapore, Online, TBA, TBD, or venue to be announced.",
             "For dates, return ISO 8601 strings with timezone offset when the event text provides enough information. If date or time is missing, return an empty string.",
             "Make introvert-friendly suggestions practical, specific, and low-pressure. Avoid generic hype."
           ].join(" ")
@@ -571,6 +576,32 @@ function extractLocation(lines, text) {
   return "Venue to confirm";
 }
 
+function hasSpecificLocation(location) {
+  const normalized = String(location || "").trim().toLowerCase();
+  if (!normalized) return false;
+
+  const vagueLocations = new Set([
+    "singapore",
+    "sg",
+    "online",
+    "virtual",
+    "tba",
+    "tbd",
+    "to be announced",
+    "venue to confirm",
+    "venue to be confirmed",
+    "venue to be announced",
+    "location to be announced",
+    "location to confirm"
+  ]);
+
+  if (vagueLocations.has(normalized)) return false;
+  if (/^(singapore|sg)[\s,.]*$/i.test(location)) return false;
+  if (/\b(tba|tbd|to be announced|to be confirmed)\b/i.test(location)) return false;
+
+  return /[0-9]|,|\b(street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd|way|place|plaza|tower|centre|center|hub|hall|hotel|office|building|mall|museum|gallery|campus|library|theatre|theater|auditorium|cafe|restaurant|studio|club|school|university|polytechnic|college|national|marina|raffles|orchard|bugis|tanjong|pagar|one-north|city hall|chinatown|sentosa)\b/i.test(location);
+}
+
 function extractDate(text) {
   const explicitIso = text.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2})(?::(\d{2}))?)?\b/);
   if (explicitIso) {
@@ -621,8 +652,9 @@ function matchesAny(text, terms) {
 }
 
 function eventPrepMessage(event) {
-  const transitUrl = mapsUrl(config.homeAddress, event.location, "transit");
-  const drivingUrl = mapsUrl(config.homeAddress, event.location, "driving");
+  const canRoute = hasSpecificLocation(event.location);
+  const transitUrl = canRoute ? mapsUrl(config.homeAddress, event.location, "transit") : "";
+  const drivingUrl = canRoute ? mapsUrl(config.homeAddress, event.location, "driving") : "";
   const talkingPoints = event.prep?.talkingPoints?.length ? event.prep.talkingPoints : talkingPointsFor(event.eventType);
   const conversationStarters = event.prep?.conversationStarters || [];
   const starts = formatDateTime(event.startsAt);
@@ -632,7 +664,7 @@ function eventPrepMessage(event) {
     `Saved: ${event.title}`,
     "",
     `When: ${starts}`,
-    `Where: ${event.location}`,
+    `Where: ${canRoute ? event.location : "Location not available yet"}`,
     `Type: ${event.eventType}`,
     event.summary ? `Summary: ${event.summary}` : "",
     event.audience ? `Likely crowd: ${event.audience}` : "",
@@ -656,6 +688,13 @@ function eventPrepMessage(event) {
 }
 
 function travelLines(event, transitUrl, drivingUrl) {
+  if (!hasSpecificLocation(event.location)) {
+    return [
+      "Travel time: not available yet",
+      "Reason: this event does not have a specific venue/address yet."
+    ];
+  }
+
   if (!event.travel?.transit && !event.travel?.driving) {
     return [
       `Public transport: ${transitUrl}`,
@@ -843,7 +882,9 @@ async function sendDueReminders() {
 
 function dayBeforeMessage(event) {
   const opener = event.prep?.conversationStarters?.[0] || talkingPointsFor(event.eventType)[0];
-  const transitLine = event.travel?.transit
+  const transitLine = !hasSpecificLocation(event.location)
+    ? "Travel time: not available yet because the venue is not specific."
+    : event.travel?.transit
     ? `Public transport: ${formatDuration(event.travel.transit.durationSeconds)}${leaveByText(event.startsAt, event.travel.transit.durationSeconds)}`
     : `Public transport: ${mapsUrl(config.homeAddress, event.location, "transit")}`;
   return [
@@ -859,6 +900,14 @@ function dayBeforeMessage(event) {
 
 function leaveTimeMessage(event) {
   const transitDuration = event.travel?.transit?.durationSeconds;
+  if (!hasSpecificLocation(event.location)) {
+    return [
+      `Venue still missing for ${event.title}.`,
+      "",
+      "I cannot calculate travel time yet. Check the event page or calendar invite for the final location before leaving."
+    ].join("\n");
+  }
+
   return [
     `Leave soon for ${event.title}.`,
     "",
