@@ -690,6 +690,28 @@ async function fetchGoogleEmail(accessToken) {
 }
 
 async function findMatchingCalendarEvent(accessToken, event) {
+  const calendars = await listGoogleCalendars(accessToken);
+  const searchableCalendars = calendars.filter((calendar) => !calendar.hidden);
+
+  for (const calendar of searchableCalendars) {
+    const match = await findMatchingCalendarEventInCalendar(accessToken, calendar.id, event);
+    if (match) return match;
+  }
+
+  return null;
+}
+
+async function listGoogleCalendars(accessToken) {
+  const response = await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250", {
+    headers: { authorization: `Bearer ${accessToken}` }
+  });
+
+  if (!response.ok) throw new Error(`Calendar list lookup failed: ${response.status} ${await response.text()}`);
+  const data = await response.json();
+  return data.items || [];
+}
+
+async function findMatchingCalendarEventInCalendar(accessToken, calendarId, event) {
   const start = new Date(event.startsAt);
   const timeMin = new Date(start.getTime() - 6 * 60 * 60 * 1000).toISOString();
   const timeMax = new Date(start.getTime() + 12 * 60 * 60 * 1000).toISOString();
@@ -702,7 +724,7 @@ async function findMatchingCalendarEvent(accessToken, event) {
     q: formatTitle(event.title)
   });
 
-  const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${query.toString()}`, {
+  const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${query.toString()}`, {
     headers: { authorization: `Bearer ${accessToken}` }
   });
 
