@@ -118,7 +118,7 @@ async function handleGoogleAuthStart(url, response) {
   authUrl.searchParams.set("client_id", config.googleClientId);
   authUrl.searchParams.set("redirect_uri", config.googleRedirectUri);
   authUrl.searchParams.set("response_type", "code");
-  authUrl.searchParams.set("scope", "https://www.googleapis.com/auth/calendar.events.readonly https://www.googleapis.com/auth/userinfo.email");
+  authUrl.searchParams.set("scope", "https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events.readonly https://www.googleapis.com/auth/userinfo.email");
   authUrl.searchParams.set("access_type", "offline");
   authUrl.searchParams.set("prompt", "consent");
   authUrl.searchParams.set("state", userId);
@@ -690,7 +690,10 @@ async function fetchGoogleEmail(accessToken) {
 }
 
 async function findMatchingCalendarEvent(accessToken, event) {
-  const calendars = await listGoogleCalendars(accessToken);
+  const calendars = await listGoogleCalendars(accessToken).catch((error) => {
+    console.error("Calendar list failed, falling back to primary calendar:", error.message);
+    return [{ id: "primary", summary: "Primary" }];
+  });
   const searchableCalendars = calendars.filter((calendar) => !calendar.hidden);
 
   for (const calendar of searchableCalendars) {
@@ -715,14 +718,28 @@ async function findMatchingCalendarEventInCalendar(accessToken, calendarId, even
   const start = new Date(event.startsAt);
   const timeMin = new Date(start.getTime() - 6 * 60 * 60 * 1000).toISOString();
   const timeMax = new Date(start.getTime() + 12 * 60 * 60 * 1000).toISOString();
+  const queriedItems = await fetchCalendarEvents(accessToken, calendarId, {
+    timeMin,
+    timeMax,
+    q: formatTitle(event.title)
+  });
+  const timeWindowItems = await fetchCalendarEvents(accessToken, calendarId, { timeMin, timeMax });
+  const items = dedupeCalendarEvents([...queriedItems, ...timeWindowItems]);
+
+  return items.find((item) => calendarEventLooksLikeMatch(item, event) && hasSpecificLocation(item.location))
+    || items.find((item) => calendarEventLooksLikeMatch(item, event))
+    || null;
+}
+
+async function fetchCalendarEvents(accessToken, calendarId, { timeMin, timeMax, q = "" }) {
   const query = new URLSearchParams({
     timeMin,
     timeMax,
     singleEvents: "true",
     orderBy: "startTime",
-    maxResults: "20",
-    q: formatTitle(event.title)
+    maxResults: "50"
   });
+  if (q) query.set("q", q);
 
   const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${query.toString()}`, {
     headers: { authorization: `Bearer ${accessToken}` }
@@ -730,8 +747,17 @@ async function findMatchingCalendarEventInCalendar(accessToken, calendarId, even
 
   if (!response.ok) throw new Error(`Calendar events lookup failed: ${response.status} ${await response.text()}`);
   const data = await response.json();
-  const items = data.items || [];
-  return items.find((item) => calendarEventLooksLikeMatch(item, event)) || items.find((item) => hasSpecificLocation(item.location)) || null;
+  return data.items || [];
+}
+
+function dedupeCalendarEvents(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = item.id || `${item.summary}:${item.start?.dateTime || item.start?.date}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function calendarEventLooksLikeMatch(calendarEvent, event) {
@@ -742,7 +768,26 @@ function calendarEventLooksLikeMatch(calendarEvent, event) {
   const calendarStart = new Date(calendarEvent.start?.dateTime || calendarEvent.start?.date || "");
   const eventStart = new Date(event.startsAt);
   const closeInTime = Math.abs(calendarStart.getTime() - eventStart.getTime()) < 3 * 60 * 60 * 1000;
-  return closeInTime && (calendarTitle.includes(eventTitle.slice(0, 20)) || eventTitle.includes(calendarTitle.slice(0, 20)));
+  return closeInTime && (
+    calendarTitle.includes(eventTitle.slice(0, 20))
+    || eventTitle.includes(calendarTitle.slice(0, 20))
+    || sharedTitleWordCount(calendarTitle, eventTitle) >= 2
+    || calendarEventContainsUrl(calendarEvent, event.url)
+  );
+}
+
+function sharedTitleWordCount(left, right) {
+  const ignored = new Set(["with", "the", "and", "for", "this", "that", "singapore", "event"]);
+  const leftWords = new Set(left.split(" ").filter((word) => word.length > 2 && !ignored.has(word)));
+  return right.split(" ").filter((word) => leftWords.has(word)).length;
+}
+
+function calendarEventContainsUrl(calendarEvent, url) {
+  if (!url) return false;
+  const slug = url.match(/luma\.com\/([^?/\s]+)/i)?.[1];
+  if (!slug) return false;
+  return [calendarEvent.description, calendarEvent.htmlLink, calendarEvent.location]
+    .some((value) => String(value || "").includes(slug));
 }
 
 function normalizeTitle(title) {
