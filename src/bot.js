@@ -1125,7 +1125,13 @@ function helpMessage() {
 
 function calendarConnectMessage(userId) {
   if (!isGoogleCalendarConfigured()) {
-    return "Google Calendar is not configured yet. Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI in Railway first.";
+    return [
+      "Google Calendar is not configured yet.",
+      "",
+      googleCalendarConfigStatus(),
+      "",
+      "Check that these exact Railway variables exist on the event-wingmate-bot service, then apply changes and wait for redeploy."
+    ].join("\n");
   }
 
   const authUrl = new URL(config.googleRedirectUri);
@@ -1150,7 +1156,17 @@ async function settingsMessage(userId) {
     `Your Telegram user ID: ${userId}`,
     `Locked to user ID: ${config.allowedUserId || "first /start user"}`,
     `Storage: ${useSupabase ? "Supabase" : config.dataFile}`,
+    googleCalendarConfigStatus(),
     `Google Calendar: ${calendarConnection?.google_refresh_token ? `connected${calendarConnection.google_email ? ` (${calendarConnection.google_email})` : ""}` : "not connected"}`
+  ].join("\n");
+}
+
+function googleCalendarConfigStatus() {
+  return [
+    "Google Calendar config:",
+    `GOOGLE_CLIENT_ID: ${config.googleClientId ? "present" : "missing"}`,
+    `GOOGLE_CLIENT_SECRET: ${config.googleClientSecret ? "present" : "missing"}`,
+    `GOOGLE_REDIRECT_URI: ${config.googleRedirectUri ? "present" : "missing"}`
   ].join("\n");
 }
 
