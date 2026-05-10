@@ -1046,7 +1046,7 @@ function eventPrepMessage(event) {
   const conversationStarters = event.prep?.conversationStarters || [];
   const starts = formatDateTime(event.startsAt);
 
-  return [
+  return compactMessage([
     `Saved: ${escapeHtml(formatTitle(event.title))}`,
     `When: ${escapeHtml(starts)}`,
     `Where: ${escapeHtml(canRoute ? event.location : "Location has yet to be updated")}`,
@@ -1058,10 +1058,20 @@ function eventPrepMessage(event) {
     "",
     conversationStarters.length ? "Easy openers:" : "",
     ...formatOpeners(conversationStarters),
-    "",
+    conversationStarters.length ? "" : "",
     "Tiny mission:",
     escapeHtml(missionQuestion(event))
-  ].filter(Boolean).join("\n");
+  ]);
+}
+
+function compactMessage(lines) {
+  const output = [];
+  for (const line of lines) {
+    if (line === "" && output.at(-1) === "") continue;
+    if (line !== "" || output.length > 0) output.push(line);
+  }
+  while (output.at(-1) === "") output.pop();
+  return output.join("\n");
 }
 
 function travelLines(event, transitUrl, drivingUrl) {
