@@ -232,6 +232,15 @@ async function handleMessage(message) {
   await enrichEventWithOpenAI(event);
   await enrichEventWithCalendar(event);
   await enrichEventWithTravel(event);
+  const existingEvent = await findDuplicateEvent(event);
+  if (existingEvent) {
+    await sendMessage(chatId, duplicateEventMessage(existingEvent), {
+      disable_web_page_preview: true,
+      parse_mode: "HTML"
+    });
+    return;
+  }
+
   await saveEvent(event);
 
   await sendMessage(chatId, eventPrepMessage(event), {
@@ -888,7 +897,7 @@ async function extractEventWithOpenAI(rawText) {
             "Make the first conversation starter the warmest and safest opener: about why they came, what caught their eye, or what they are hoping to try. Put more technical questions second or third.",
             "Avoid stiff phrases like 'most wanted to replace', 'how are you thinking about', 'what is one problem', or corporate wording.",
             "Use contractions where natural. Avoid hype.",
-            "Make socialMission one concise, human question the user can ask someone at the event. Prefer the warmest opener."
+            "Make socialMission one concise, human action that is not identical to any conversation starter. It can suggest when to use one opener, but should not repeat it verbatim."
           ].join(" ")
         },
         {
@@ -1070,6 +1079,18 @@ function eventPrepMessage(event) {
   ]);
 }
 
+function duplicateEventMessage(event) {
+  return compactMessage([
+    "This event has been saved previously.",
+    "",
+    `Saved: ${escapeHtml(formatTitle(event.title))}`,
+    `When: ${escapeHtml(formatDateTime(event.startsAt))}`,
+    `Where: ${escapeHtml(shouldRouteToEventLocation(event) ? event.location : "Location has yet to be updated")}`,
+    "",
+    "I will only send one set of reminders for this event."
+  ]);
+}
+
 function compactMessage(lines) {
   const output = [];
   for (const line of lines) {
@@ -1119,13 +1140,28 @@ function formatOpeners(conversationStarters) {
 }
 
 function missionQuestion(event) {
-  const opener = cleanQuestion(event.prep?.conversationStarters?.[0]);
-  if (opener) return `Ask someone "${opener}"`;
-
   const mission = cleanQuestion(event.prep?.socialMission);
-  if (mission) return `Ask someone "${mission}"`;
+  const openers = (event.prep?.conversationStarters || []).map(cleanQuestion).filter(Boolean);
+  if (mission && !openers.some((opener) => sameQuestion(opener, mission))) {
+    return mission.includes("?") ? `Ask someone "${mission}"` : mission;
+  }
 
-  return "Ask someone \"Are you using this tool or topic in your own work?\"";
+  const fallback = nonDuplicateMission(openers);
+  if (fallback) return fallback;
+
+  return "Ask one person what made them curious enough to show up.";
+}
+
+function nonDuplicateMission(openers) {
+  if (openers.length === 0) return "";
+  if (openers.some((opener) => /what made you curious|what brought you/i.test(opener))) {
+    return "Use that first opener with one person before checking your phone.";
+  }
+  return "Ask one person what made them curious enough to show up.";
+}
+
+function sameQuestion(left, right) {
+  return normalizeTitle(left) === normalizeTitle(right);
 }
 
 function cleanQuestion(value) {
@@ -1568,6 +1604,33 @@ async function saveEvent(event) {
   const events = await readEvents();
   events.push(event);
   await writeEvents(events);
+}
+
+async function findDuplicateEvent(event) {
+  const fingerprint = eventFingerprint(event);
+
+  if (useSupabase) {
+    const query = new URLSearchParams({
+      select: "*",
+      telegram_chat_id: `eq.${event.chatId}`,
+      order: "created_at.desc",
+      limit: "25"
+    });
+    const rows = await supabaseRequest(`/rest/v1/events?${query.toString()}`);
+    return rows.map(fromSupabaseEvent).find((savedEvent) => eventFingerprint(savedEvent) === fingerprint) || null;
+  }
+
+  const events = await readEvents();
+  return events.find((savedEvent) => savedEvent.chatId === event.chatId && eventFingerprint(savedEvent) === fingerprint) || null;
+}
+
+function eventFingerprint(event) {
+  const lumaSlug = event.url?.match(/luma\.com\/([^?/\s]+)/i)?.[1];
+  if (lumaSlug) return `luma:${lumaSlug.toLowerCase()}`;
+
+  const title = normalizeTitle(event.title);
+  const date = new Date(event.startsAt).toISOString().slice(0, 16);
+  return `event:${title}:${date}`;
 }
 
 async function readEventsForChat(chatId) {
