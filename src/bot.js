@@ -1369,13 +1369,15 @@ async function readGoogleConnection(userId) {
 async function saveGoogleConnection(userId, refreshToken, email) {
   if (!useSupabase) throw new Error("Google Calendar requires Supabase storage.");
 
-  await supabaseRequest(`/rest/v1/bot_owners?telegram_user_id=eq.${encodeURIComponent(userId)}`, {
-    method: "PATCH",
-    body: {
+  await supabaseRequest("/rest/v1/bot_owners", {
+    method: "POST",
+    body: [{
+      telegram_user_id: userId,
       google_refresh_token: refreshToken,
       google_email: email || null,
       google_connected_at: new Date().toISOString()
-    }
+    }],
+    headers: { prefer: "resolution=merge-duplicates" }
   });
 }
 
