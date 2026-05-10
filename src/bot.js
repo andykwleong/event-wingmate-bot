@@ -235,7 +235,8 @@ async function handleMessage(message) {
   await saveEvent(event);
 
   await sendMessage(chatId, eventPrepMessage(event), {
-    disable_web_page_preview: true
+    disable_web_page_preview: true,
+    parse_mode: "HTML"
   });
 }
 
@@ -1046,11 +1047,11 @@ function eventPrepMessage(event) {
   const starts = formatDateTime(event.startsAt);
 
   return [
-    `Saved: ${formatTitle(event.title)}`,
-    `When: ${starts}`,
-    `Where: ${canRoute ? event.location : "Location has yet to be updated"}`,
-    event.summary ? `Summary: ${event.summary}` : "",
-    event.url ? `Link: ${event.url}` : "",
+    `Saved: ${escapeHtml(formatTitle(event.title))}`,
+    `When: ${escapeHtml(starts)}`,
+    `Where: ${escapeHtml(canRoute ? event.location : "Location has yet to be updated")}`,
+    event.summary ? `Summary: ${escapeHtml(event.summary)}` : "",
+    event.url ? `Link: ${escapeHtml(event.url)}` : "",
     "",
     "Getting there:",
     ...travelLines(event, transitUrl, drivingUrl),
@@ -1059,7 +1060,7 @@ function eventPrepMessage(event) {
     ...formatOpeners(conversationStarters),
     "",
     "Tiny mission:",
-    missionQuestion(event)
+    escapeHtml(missionQuestion(event))
   ].filter(Boolean).join("\n");
 }
 
@@ -1072,33 +1073,33 @@ function travelLines(event, transitUrl, drivingUrl) {
 
   if (!event.travel?.transit && !event.travel?.driving) {
     return [
-      `Public transport: ${transitUrl}`,
-      `Car: ${drivingUrl}`
+      `Public transport: ${escapeHtml(transitUrl)}`,
+      `Car: ${escapeHtml(drivingUrl)}`
     ];
   }
 
   const lines = [];
   if (event.travel?.transit) {
-    lines.push(`Public transport: ${formatDuration(event.travel.transit.durationSeconds)}${leaveByText(event.startsAt, event.travel.transit.durationSeconds)}`);
-    if (event.travel.transit.summary) lines.push(`Route: ${event.travel.transit.summary}`);
+    lines.push(`Public transport: ${escapeHtml(formatDuration(event.travel.transit.durationSeconds))}${escapeHtml(leaveByText(event.startsAt, event.travel.transit.durationSeconds))}`);
+    if (event.travel.transit.summary) lines.push(`Route: ${escapeHtml(event.travel.transit.summary)}`);
   } else {
-    lines.push(`Public transport: ${transitUrl}`);
+    lines.push(`Public transport: ${escapeHtml(transitUrl)}`);
   }
 
   if (event.travel?.driving) {
-    lines.push(`Car: ${formatDuration(event.travel.driving.durationSeconds)}${leaveByText(event.startsAt, event.travel.driving.durationSeconds)}`);
+    lines.push(`Car: ${escapeHtml(formatDuration(event.travel.driving.durationSeconds))}${escapeHtml(leaveByText(event.startsAt, event.travel.driving.durationSeconds))}`);
   } else {
-    lines.push(`Car: ${drivingUrl}`);
+    lines.push(`Car: ${escapeHtml(drivingUrl)}`);
   }
 
-  lines.push(`Open in Maps: ${transitUrl}`);
+  lines.push(`Open in Maps: <a href="${escapeHtmlAttribute(transitUrl)}">Here</a>`);
   return lines;
 }
 
 function formatOpeners(conversationStarters) {
   return conversationStarters
     .slice(0, 3)
-    .flatMap((point) => [`- ${point}`, ""]);
+    .flatMap((point) => [`- ${escapeHtml(point)}`, ""]);
 }
 
 function missionQuestion(event) {
@@ -1124,6 +1125,17 @@ function formatTitle(title) {
     .replace(/[“”]/g, "\"")
     .replace(/^"([^"]+)"(.*)$/u, "$1$2")
     .trim();
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapeHtmlAttribute(value) {
+  return escapeHtml(value).replace(/"/g, "&quot;");
 }
 
 function leaveByText(startsAt, durationSeconds) {
