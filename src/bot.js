@@ -220,6 +220,11 @@ async function handleMessage(message) {
     return;
   }
 
+  if (text === "/debug_calendar") {
+    await sendMessage(chatId, await debugCalendarMessage(chatId, userId));
+    return;
+  }
+
   const enrichedText = await enrichTextWithLinkedPage(text);
   const event = parseEvent(enrichedText, chatId, userId);
   event.rawText = text;
@@ -1191,6 +1196,7 @@ function helpMessage() {
     "Commands:",
     "/events - list saved events",
     "/connect_calendar - connect Google Calendar",
+    "/debug_calendar - show calendar events the bot can see near your latest saved event",
     "/settings - show current settings",
     "/help - show this message",
     "",
@@ -1199,6 +1205,58 @@ function helpMessage() {
     "- Event title, date, venue, and description",
     "- Any event invite text"
   ].join("\n");
+}
+
+async function debugCalendarMessage(chatId, userId) {
+  if (!isGoogleCalendarConfigured()) return "Google Calendar is not configured.";
+  if (!useSupabase) return "Calendar debugging requires Supabase storage.";
+
+  const connection = await readGoogleConnection(userId);
+  if (!connection?.google_refresh_token) return "Google Calendar is not connected. Run /connect_calendar first.";
+
+  const events = await readEventsForChat(chatId);
+  const latestEvent = events.at(-1);
+  if (!latestEvent) return "No saved event to debug yet. Paste the Luma link first, then run /debug_calendar.";
+
+  try {
+    const accessToken = await refreshGoogleAccessToken(connection.google_refresh_token);
+    const calendars = await listGoogleCalendars(accessToken).catch((error) => {
+      console.error("Calendar debug list failed, falling back to primary:", error.message);
+      return [{ id: "primary", summary: "Primary" }];
+    });
+    const start = new Date(latestEvent.startsAt);
+    const timeMin = new Date(start.getTime() - 6 * 60 * 60 * 1000).toISOString();
+    const timeMax = new Date(start.getTime() + 12 * 60 * 60 * 1000).toISOString();
+    const lines = [
+      `Debugging calendar near: ${formatDateTime(latestEvent.startsAt)}`,
+      `Looking for: ${formatTitle(latestEvent.title)}`,
+      ""
+    ];
+
+    let shown = 0;
+    for (const calendar of calendars.filter((calendar) => !calendar.hidden)) {
+      const items = await fetchCalendarEvents(accessToken, calendar.id, { timeMin, timeMax }).catch((error) => {
+        console.error(`Calendar debug failed for ${calendar.summary || calendar.id}:`, error.message);
+        return [];
+      });
+
+      for (const item of items.slice(0, 5)) {
+        shown += 1;
+        lines.push(`Calendar: ${calendar.summary || calendar.id}`);
+        lines.push(`Event: ${item.summary || "(no title)"}`);
+        lines.push(`Time: ${formatDateTime(item.start?.dateTime || item.start?.date)}`);
+        lines.push(`Location: ${item.location || "(no location returned)"}`);
+        lines.push("");
+        if (shown >= 10) break;
+      }
+      if (shown >= 10) break;
+    }
+
+    if (shown === 0) lines.push("No calendar events returned in that time window.");
+    return lines.join("\n").trim();
+  } catch (error) {
+    return `Calendar debug failed: ${error.message}`;
+  }
 }
 
 function calendarConnectMessage(userId) {
