@@ -774,8 +774,10 @@ function calendarEventLooksLikeMatch(calendarEvent, event) {
   const eventStart = new Date(event.startsAt);
   const closeInTime = Math.abs(calendarStart.getTime() - eventStart.getTime()) < 3 * 60 * 60 * 1000;
   return closeInTime && (
-    calendarTitle.includes(eventTitle.slice(0, 20))
-    || eventTitle.includes(calendarTitle.slice(0, 20))
+    calendarTitle.includes(eventTitle)
+    || eventTitle.includes(calendarTitle)
+    || compactTitle(calendarTitle).includes(compactTitle(eventTitle))
+    || compactTitle(eventTitle).includes(compactTitle(calendarTitle))
     || sharedTitleWordCount(calendarTitle, eventTitle) >= 2
     || calendarEventContainsUrl(calendarEvent, event.url)
   );
@@ -800,6 +802,10 @@ function normalizeTitle(title) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+function compactTitle(title) {
+  return normalizeTitle(title).replace(/\s+/g, "");
 }
 
 async function extractEventWithOpenAI(rawText) {
