@@ -723,8 +723,7 @@ function eventPrepMessage(event) {
   const starts = formatDateTime(event.startsAt);
 
   return [
-    `Saved: ${event.title}`,
-    "",
+    `Saved: ${formatTitle(event.title)}`,
     `When: ${starts}`,
     `Where: ${canRoute ? event.location : "Location has yet to be updated"}`,
     event.summary ? `Summary: ${event.summary}` : "",
@@ -780,11 +779,28 @@ function formatOpeners(conversationStarters) {
 }
 
 function missionQuestion(event) {
-  const mission = String(event.prep?.socialMission || "").trim();
-  if (mission && mission.length <= 140 && mission.includes("?")) return mission;
-  const opener = event.prep?.conversationStarters?.[0];
-  if (opener) return opener;
-  return "Are you using this tool or topic in your own work?";
+  const opener = cleanQuestion(event.prep?.conversationStarters?.[0]);
+  if (opener) return `Ask someone "${opener}"`;
+
+  const mission = cleanQuestion(event.prep?.socialMission);
+  if (mission) return `Ask someone "${mission}"`;
+
+  return "Ask someone \"Are you using this tool or topic in your own work?\"";
+}
+
+function cleanQuestion(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^ask someone\s+/i, "")
+    .replace(/^["']|["']$/g, "")
+    .trim();
+}
+
+function formatTitle(title) {
+  return String(title || "Untitled event")
+    .replace(/[“”]/g, "\"")
+    .replace(/^"([^"]+)"(.*)$/u, "$1$2")
+    .trim();
 }
 
 function leaveByText(startsAt, durationSeconds) {
