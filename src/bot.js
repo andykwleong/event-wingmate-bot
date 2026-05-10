@@ -883,8 +883,12 @@ async function extractEventWithOpenAI(rawText) {
             "If fetched details include 'Google Maps destination:' or 'Coordinates:', use that exact coordinate pair as the location.",
             "If the event only exposes a city-level location and no coordinates or maps destination, put venue/address in missingInfo and return an empty location.",
             "For dates, return ISO 8601 strings with timezone offset when the event text provides enough information. If date or time is missing, return an empty string.",
-            "Make introvert-friendly suggestions practical, specific, and low-pressure. Avoid generic hype.",
-            "Make socialMission one concise question the user can ask someone at the event."
+            "Write for an introvert who wants one natural, low-pressure conversation, not generic networking.",
+            "Conversation starters must sound like something a person would casually say out loud. Keep each under 16 words.",
+            "Make the first conversation starter the warmest and safest opener: about why they came, what caught their eye, or what they are hoping to try. Put more technical questions second or third.",
+            "Avoid stiff phrases like 'most wanted to replace', 'how are you thinking about', 'what is one problem', or corporate wording.",
+            "Use contractions where natural. Avoid hype.",
+            "Make socialMission one concise, human question the user can ask someone at the event. Prefer the warmest opener."
           ].join(" ")
         },
         {
