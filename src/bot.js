@@ -335,6 +335,7 @@ async function fetchEventPageText(url) {
     extractMetaContent(html, "og:title"),
     extractMetaContent(html, "og:description"),
     extractMetaContent(html, "og:site_name"),
+    ...extractLumaNextDataDetails(html),
     locationHidden ? "Luma location status: exact location hidden until registration or calendar update" : "",
     ...(locationHidden ? [] : extractGoogleMapsDestinations(html)),
     ...extractJsonLdSummaries(html)
@@ -347,6 +348,47 @@ async function fetchEventPageText(url) {
 
 function isLumaExactLocationHidden(html) {
   return /please register to see the exact location of this event/i.test(html);
+}
+
+function extractLumaNextDataDetails(html) {
+  const match = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/i);
+  if (!match) return [];
+
+  try {
+    const parsed = JSON.parse(match[1]);
+    const data = parsed.props?.pageProps?.initialData?.data;
+    const event = data?.event || data;
+    const addressInfo = event?.geo_address_info || {};
+    const exactLocation = extractExactLumaLocation(event, addressInfo);
+    const locationIsHidden = event?.geo_address_visibility === "guests-only" || addressInfo.mode === "obfuscated";
+
+    return uniqueNonEmpty([
+      event?.name ? `Luma event title: ${event.name}` : "",
+      event?.start_at ? `Luma event start: ${event.start_at}` : "",
+      exactLocation ? `Luma exact location: ${exactLocation}` : "",
+      !exactLocation && locationIsHidden ? "Luma location status: exact location hidden until registration or calendar update" : ""
+    ]);
+  } catch {
+    return [];
+  }
+}
+
+function extractExactLumaLocation(event, addressInfo) {
+  const candidates = [
+    event?.geo_address,
+    event?.geo_address_json?.address,
+    event?.geo_address_json?.formatted_address,
+    event?.location?.name,
+    event?.location?.address,
+    event?.venue?.name && event?.venue?.address ? `${event.venue.name}, ${event.venue.address}` : "",
+    addressInfo?.name && addressInfo?.address ? `${addressInfo.name}, ${addressInfo.address}` : "",
+    addressInfo?.place_name && addressInfo?.address ? `${addressInfo.place_name}, ${addressInfo.address}` : "",
+    addressInfo?.full_address,
+    addressInfo?.formatted_address,
+    addressInfo?.address
+  ];
+
+  return uniqueNonEmpty(candidates).find(hasSpecificLocation) || "";
 }
 
 function extractGoogleMapsDestinations(html) {
