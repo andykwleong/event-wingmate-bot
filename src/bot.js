@@ -45,8 +45,8 @@ function loadEnv() {
   return parsed;
 }
 
-function startHealthServer() {
-  const server = http.createServer(async (request, response) => {
+function createHttpHandler() {
+  return async (request, response) => {
     const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
     if (url.pathname === "/health") {
@@ -67,11 +67,22 @@ function startHealthServer() {
 
     response.writeHead(200, { "content-type": "text/plain" });
     response.end("Event Wingmate bot is running.\n");
-  });
+  };
+}
 
-  server.listen(config.port, () => {
-    console.log(`Health server listening on port ${config.port}.`);
-  });
+function startHealthServer() {
+  const handler = createHttpHandler();
+  const ports = [...new Set([config.port, 3000].filter(Boolean))];
+
+  for (const port of ports) {
+    const server = http.createServer(handler);
+    server.on("error", (error) => {
+      console.error(`Health server failed on port ${port}:`, error.message);
+    });
+    server.listen(port, () => {
+      console.log(`Health server listening on port ${port}.`);
+    });
+  }
 }
 
 function readSettingsFileInto(target, filePath) {
