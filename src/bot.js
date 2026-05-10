@@ -636,6 +636,7 @@ async function enrichEventWithCalendar(event) {
     const location = calendarEvent?.location?.trim();
     if (hasSpecificLocation(location)) {
       event.location = location;
+      event.locationSource = "google_calendar";
       event.prep = {
         ...(event.prep || {}),
         missingInfo: []
@@ -942,6 +943,7 @@ function extractLocation(lines, text) {
 }
 
 function shouldRouteToEventLocation(event) {
+  if (event.locationSource === "google_calendar") return hasSpecificLocation(event.location);
   if (isLocationHiddenFromBot(event.sourceText)) return false;
   return hasSpecificLocation(event.location) && (!hasMissingLocationInfo(event.prep?.missingInfo) || isCoordinateLocation(event.location));
 }
