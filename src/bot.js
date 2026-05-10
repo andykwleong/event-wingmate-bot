@@ -328,19 +328,25 @@ async function fetchEventPageText(url) {
   if (!response.ok) throw new Error(`Page returned ${response.status}`);
 
   const html = await response.text();
+  const locationHidden = isLumaExactLocationHidden(html);
   const pieces = [
     extractHtmlTitle(html),
     extractMetaContent(html, "description"),
     extractMetaContent(html, "og:title"),
     extractMetaContent(html, "og:description"),
     extractMetaContent(html, "og:site_name"),
-    ...extractGoogleMapsDestinations(html),
+    locationHidden ? "Luma location status: exact location hidden until registration or calendar update" : "",
+    ...(locationHidden ? [] : extractGoogleMapsDestinations(html)),
     ...extractJsonLdSummaries(html)
   ];
 
   return uniqueNonEmpty(pieces)
     .join("\n")
     .slice(0, 12000);
+}
+
+function isLumaExactLocationHidden(html) {
+  return /please register to see the exact location of this event/i.test(html);
 }
 
 function extractGoogleMapsDestinations(html) {
@@ -471,6 +477,11 @@ async function enrichEventWithOpenAI(event) {
       encouragement: extracted.encouragement || "",
       missingInfo: extracted.missingInfo || []
     };
+
+    if (isLocationHiddenFromBot(event.sourceText)) {
+      event.location = "Location has yet to be updated";
+      event.prep.missingInfo = [];
+    }
   } catch (error) {
     console.error("OpenAI extraction failed, using rule-based parser:", error.message);
   }
@@ -549,7 +560,8 @@ async function extractEventWithOpenAI(rawText) {
             "If fetched details include 'Google Maps destination:' or 'Coordinates:', use that exact coordinate pair as the location.",
             "If the event only exposes a city-level location and no coordinates or maps destination, put venue/address in missingInfo and return an empty location.",
             "For dates, return ISO 8601 strings with timezone offset when the event text provides enough information. If date or time is missing, return an empty string.",
-            "Make introvert-friendly suggestions practical, specific, and low-pressure. Avoid generic hype."
+            "Make introvert-friendly suggestions practical, specific, and low-pressure. Avoid generic hype.",
+            "Make socialMission one concise question the user can ask someone at the event."
           ].join(" ")
         },
         {
@@ -609,7 +621,12 @@ function extractLocation(lines, text) {
 }
 
 function shouldRouteToEventLocation(event) {
+  if (isLocationHiddenFromBot(event.sourceText)) return false;
   return hasSpecificLocation(event.location) && (!hasMissingLocationInfo(event.prep?.missingInfo) || isCoordinateLocation(event.location));
+}
+
+function isLocationHiddenFromBot(sourceText = "") {
+  return /Luma location status: exact location hidden/i.test(sourceText);
 }
 
 function hasMissingLocationInfo(missingInfo = []) {
@@ -702,43 +719,32 @@ function eventPrepMessage(event) {
   const canRoute = shouldRouteToEventLocation(event);
   const transitUrl = canRoute ? mapsUrl(config.homeAddress, event.location, "transit") : "";
   const drivingUrl = canRoute ? mapsUrl(config.homeAddress, event.location, "driving") : "";
-  const talkingPoints = event.prep?.talkingPoints?.length ? event.prep.talkingPoints : talkingPointsFor(event.eventType);
   const conversationStarters = event.prep?.conversationStarters || [];
   const starts = formatDateTime(event.startsAt);
-  const missingInfo = event.prep?.missingInfo || [];
 
   return [
     `Saved: ${event.title}`,
     "",
     `When: ${starts}`,
-    `Where: ${canRoute ? event.location : "Location not available yet"}`,
-    `Type: ${event.eventType}`,
+    `Where: ${canRoute ? event.location : "Location has yet to be updated"}`,
     event.summary ? `Summary: ${event.summary}` : "",
-    event.audience ? `Likely crowd: ${event.audience}` : "",
     event.url ? `Link: ${event.url}` : "",
-    missingInfo.length ? `Missing: ${missingInfo.join(", ")}` : "",
     "",
     "Getting there:",
     ...travelLines(event, transitUrl, drivingUrl),
     "",
     conversationStarters.length ? "Easy openers:" : "",
-    ...conversationStarters.slice(0, 3).map((point) => `- ${point}`),
-    conversationStarters.length ? "" : "",
-    "Your introvert prep:",
-    ...talkingPoints.map((point) => `- ${point}`),
+    ...formatOpeners(conversationStarters),
     "",
     "Tiny mission:",
-    event.prep?.socialMission || "Talk to one person before checking your phone. Ask one follow-up question. That counts.",
-    "",
-    event.prep?.encouragement || ""
+    missionQuestion(event)
   ].filter(Boolean).join("\n");
 }
 
 function travelLines(event, transitUrl, drivingUrl) {
   if (!shouldRouteToEventLocation(event)) {
     return [
-      "Travel time: not available yet",
-      "Reason: this event does not have a specific venue/address yet."
+      "Travel time: not available until the location is updated."
     ];
   }
 
@@ -765,6 +771,20 @@ function travelLines(event, transitUrl, drivingUrl) {
 
   lines.push(`Open in Maps: ${transitUrl}`);
   return lines;
+}
+
+function formatOpeners(conversationStarters) {
+  return conversationStarters
+    .slice(0, 3)
+    .flatMap((point) => [`- ${point}`, ""]);
+}
+
+function missionQuestion(event) {
+  const mission = String(event.prep?.socialMission || "").trim();
+  if (mission && mission.length <= 140 && mission.includes("?")) return mission;
+  const opener = event.prep?.conversationStarters?.[0];
+  if (opener) return opener;
+  return "Are you using this tool or topic in your own work?";
 }
 
 function leaveByText(startsAt, durationSeconds) {
