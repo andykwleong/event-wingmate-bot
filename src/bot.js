@@ -225,6 +225,11 @@ async function handleMessage(message) {
     return;
   }
 
+  if (text === "/delete_all_events" || text === "/delete_all_events confirm") {
+    await sendMessage(chatId, await deleteAllEventsMessage(chatId, text));
+    return;
+  }
+
   if (text === "/debug_calendar") {
     await sendMessage(chatId, await debugCalendarMessage(chatId, userId));
     return;
@@ -1273,6 +1278,7 @@ function helpMessage() {
     "Commands:",
     "/events - list saved events",
     "/delete_event 1 - delete a saved event by number",
+    "/delete_all_events - delete all saved events after confirmation",
     "/connect_calendar - connect Google Calendar",
     "/debug_calendar - show calendar events the bot can see near your latest saved event",
     "/settings - show current settings",
@@ -1423,6 +1429,23 @@ async function deleteEventMessage(chatId, text) {
     "",
     "I will not send reminders for this event."
   ].join("\n");
+}
+
+async function deleteAllEventsMessage(chatId, text) {
+  const events = await readEventsForChat(chatId);
+  if (events.length === 0) return "No saved events to delete.";
+
+  if (text !== "/delete_all_events confirm") {
+    return [
+      `This will delete ${events.length} saved event${events.length === 1 ? "" : "s"} and stop their reminders.`,
+      "",
+      "To confirm, send:",
+      "/delete_all_events confirm"
+    ].join("\n");
+  }
+
+  await deleteEventsForChat(chatId);
+  return `Deleted ${events.length} saved event${events.length === 1 ? "" : "s"}.`;
 }
 
 function scheduleReminderLoop() {
@@ -1725,6 +1748,18 @@ async function deleteEvent(event) {
 
   const events = await readEvents();
   await writeEvents(events.filter((savedEvent) => savedEvent.id !== event.id));
+}
+
+async function deleteEventsForChat(chatId) {
+  if (useSupabase) {
+    await supabaseRequest(`/rest/v1/events?telegram_chat_id=eq.${encodeURIComponent(chatId)}`, {
+      method: "DELETE"
+    });
+    return;
+  }
+
+  const events = await readEvents();
+  await writeEvents(events.filter((savedEvent) => savedEvent.chatId !== chatId));
 }
 
 async function deleteExpiredEvents() {
