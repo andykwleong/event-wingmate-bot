@@ -16,6 +16,9 @@ const config = {
   openaiApiKey: env.OPENAI_API_KEY || "",
   openaiModel: env.OPENAI_MODEL || "gpt-5.4-mini",
   googleMapsApiKey: env.GOOGLE_MAPS_API_KEY || "",
+  googleClientId: env.GOOGLE_CLIENT_ID || "",
+  googleClientSecret: env.GOOGLE_CLIENT_SECRET || "",
+  googleRedirectUri: env.GOOGLE_REDIRECT_URI || "",
   port: Number(env.PORT || 3000)
 };
 
@@ -43,10 +46,22 @@ function loadEnv() {
 }
 
 function startHealthServer() {
-  const server = http.createServer((request, response) => {
-    if (request.url === "/health") {
+  const server = http.createServer(async (request, response) => {
+    const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
+
+    if (url.pathname === "/health") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ ok: true, service: "event-wingmate" }));
+      return;
+    }
+
+    if (url.pathname === "/auth/google") {
+      await handleGoogleAuthStart(url, response);
+      return;
+    }
+
+    if (url.pathname === "/auth/google/callback") {
+      await handleGoogleAuthCallback(url, response);
       return;
     }
 
@@ -74,6 +89,64 @@ function readSettingsFileInto(target, filePath) {
   } catch {
     // Settings files are optional. Real environment variables work too.
   }
+}
+
+async function handleGoogleAuthStart(url, response) {
+  if (!isGoogleCalendarConfigured()) {
+    sendTextResponse(response, 500, "Google Calendar is not configured in Railway yet.");
+    return;
+  }
+
+  const userId = url.searchParams.get("user_id");
+  if (!userId || !(await isAllowedUser(userId, "/connect_calendar"))) {
+    sendTextResponse(response, 403, "This calendar connection link is not valid for this bot.");
+    return;
+  }
+
+  const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  authUrl.searchParams.set("client_id", config.googleClientId);
+  authUrl.searchParams.set("redirect_uri", config.googleRedirectUri);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("scope", "https://www.googleapis.com/auth/calendar.events.readonly https://www.googleapis.com/auth/userinfo.email");
+  authUrl.searchParams.set("access_type", "offline");
+  authUrl.searchParams.set("prompt", "consent");
+  authUrl.searchParams.set("state", userId);
+
+  response.writeHead(302, { location: authUrl.toString() });
+  response.end();
+}
+
+async function handleGoogleAuthCallback(url, response) {
+  const code = url.searchParams.get("code");
+  const userId = url.searchParams.get("state");
+  if (!code || !userId) {
+    sendTextResponse(response, 400, "Missing Google authorization code.");
+    return;
+  }
+
+  try {
+    const tokens = await exchangeGoogleCode(code);
+    if (!tokens.refresh_token) {
+      sendTextResponse(response, 400, "Google did not return a refresh token. Try /connect_calendar again.");
+      return;
+    }
+
+    const email = await fetchGoogleEmail(tokens.access_token);
+    await saveGoogleConnection(userId, tokens.refresh_token, email);
+    sendTextResponse(response, 200, "Google Calendar connected. You can close this tab and return to Telegram.");
+  } catch (error) {
+    console.error("Google auth callback failed:", error.message);
+    sendTextResponse(response, 500, "Google Calendar connection failed. Check Railway logs.");
+  }
+}
+
+function sendTextResponse(response, status, body) {
+  response.writeHead(status, { "content-type": "text/plain" });
+  response.end(`${body}\n`);
+}
+
+function isGoogleCalendarConfigured() {
+  return Boolean(config.googleClientId && config.googleClientSecret && config.googleRedirectUri);
 }
 
 async function pollForever() {
@@ -121,8 +194,13 @@ async function handleMessage(message) {
     return;
   }
 
+  if (text === "/connect_calendar") {
+    await sendMessage(chatId, calendarConnectMessage(userId));
+    return;
+  }
+
   if (text === "/settings") {
-    await sendMessage(chatId, settingsMessage(userId));
+    await sendMessage(chatId, await settingsMessage(userId));
     return;
   }
 
@@ -136,6 +214,7 @@ async function handleMessage(message) {
   event.rawText = text;
   event.sourceText = enrichedText;
   await enrichEventWithOpenAI(event);
+  await enrichEventWithCalendar(event);
   await enrichEventWithTravel(event);
   await saveEvent(event);
 
@@ -527,6 +606,117 @@ async function enrichEventWithOpenAI(event) {
   } catch (error) {
     console.error("OpenAI extraction failed, using rule-based parser:", error.message);
   }
+}
+
+async function enrichEventWithCalendar(event) {
+  if (!isGoogleCalendarConfigured() || !useSupabase) return;
+
+  try {
+    const connection = await readGoogleConnection(event.userId);
+    if (!connection?.google_refresh_token) return;
+
+    const accessToken = await refreshGoogleAccessToken(connection.google_refresh_token);
+    const calendarEvent = await findMatchingCalendarEvent(accessToken, event);
+    const location = calendarEvent?.location?.trim();
+    if (hasSpecificLocation(location)) {
+      event.location = location;
+      event.prep = {
+        ...(event.prep || {}),
+        missingInfo: []
+      };
+    }
+  } catch (error) {
+    console.error("Google Calendar lookup failed:", error.message);
+  }
+}
+
+async function exchangeGoogleCode(code) {
+  const body = new URLSearchParams({
+    code,
+    client_id: config.googleClientId,
+    client_secret: config.googleClientSecret,
+    redirect_uri: config.googleRedirectUri,
+    grant_type: "authorization_code"
+  });
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body
+  });
+
+  if (!response.ok) throw new Error(`Token exchange failed: ${response.status} ${await response.text()}`);
+  return response.json();
+}
+
+async function refreshGoogleAccessToken(refreshToken) {
+  const body = new URLSearchParams({
+    refresh_token: refreshToken,
+    client_id: config.googleClientId,
+    client_secret: config.googleClientSecret,
+    grant_type: "refresh_token"
+  });
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body
+  });
+
+  if (!response.ok) throw new Error(`Token refresh failed: ${response.status} ${await response.text()}`);
+  const data = await response.json();
+  return data.access_token;
+}
+
+async function fetchGoogleEmail(accessToken) {
+  const response = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+    headers: { authorization: `Bearer ${accessToken}` }
+  });
+
+  if (!response.ok) return "";
+  const data = await response.json();
+  return data.email || "";
+}
+
+async function findMatchingCalendarEvent(accessToken, event) {
+  const start = new Date(event.startsAt);
+  const timeMin = new Date(start.getTime() - 6 * 60 * 60 * 1000).toISOString();
+  const timeMax = new Date(start.getTime() + 12 * 60 * 60 * 1000).toISOString();
+  const query = new URLSearchParams({
+    timeMin,
+    timeMax,
+    singleEvents: "true",
+    orderBy: "startTime",
+    maxResults: "20",
+    q: formatTitle(event.title)
+  });
+
+  const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${query.toString()}`, {
+    headers: { authorization: `Bearer ${accessToken}` }
+  });
+
+  if (!response.ok) throw new Error(`Calendar events lookup failed: ${response.status} ${await response.text()}`);
+  const data = await response.json();
+  const items = data.items || [];
+  return items.find((item) => calendarEventLooksLikeMatch(item, event)) || items.find((item) => hasSpecificLocation(item.location)) || null;
+}
+
+function calendarEventLooksLikeMatch(calendarEvent, event) {
+  const calendarTitle = normalizeTitle(calendarEvent.summary || "");
+  const eventTitle = normalizeTitle(event.title || "");
+  if (!calendarTitle || !eventTitle) return false;
+
+  const calendarStart = new Date(calendarEvent.start?.dateTime || calendarEvent.start?.date || "");
+  const eventStart = new Date(event.startsAt);
+  const closeInTime = Math.abs(calendarStart.getTime() - eventStart.getTime()) < 3 * 60 * 60 * 1000;
+  return closeInTime && (calendarTitle.includes(eventTitle.slice(0, 20)) || eventTitle.includes(calendarTitle.slice(0, 20)));
+}
+
+function normalizeTitle(title) {
+  return formatTitle(title)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 async function extractEventWithOpenAI(rawText) {
@@ -922,6 +1112,7 @@ function helpMessage() {
   return [
     "Commands:",
     "/events - list saved events",
+    "/connect_calendar - connect Google Calendar",
     "/settings - show current settings",
     "/help - show this message",
     "",
@@ -932,14 +1123,34 @@ function helpMessage() {
   ].join("\n");
 }
 
-function settingsMessage(userId) {
+function calendarConnectMessage(userId) {
+  if (!isGoogleCalendarConfigured()) {
+    return "Google Calendar is not configured yet. Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI in Railway first.";
+  }
+
+  const authUrl = new URL(config.googleRedirectUri);
+  authUrl.pathname = "/auth/google";
+  authUrl.search = "";
+  authUrl.searchParams.set("user_id", userId);
+
+  return [
+    "Connect Google Calendar here:",
+    authUrl.toString(),
+    "",
+    "I will only request read-only calendar access so I can find exact event locations."
+  ].join("\n");
+}
+
+async function settingsMessage(userId) {
+  const calendarConnection = useSupabase ? await readGoogleConnection(userId) : null;
   return [
     "Current settings:",
     `Home address: ${config.homeAddress}`,
     `Timezone: ${config.timezone}`,
     `Your Telegram user ID: ${userId}`,
     `Locked to user ID: ${config.allowedUserId || "first /start user"}`,
-    `Storage: ${useSupabase ? "Supabase" : config.dataFile}`
+    `Storage: ${useSupabase ? "Supabase" : config.dataFile}`,
+    `Google Calendar: ${calendarConnection?.google_refresh_token ? `connected${calendarConnection.google_email ? ` (${calendarConnection.google_email})` : ""}` : "not connected"}`
   ].join("\n");
 }
 
@@ -1115,6 +1326,30 @@ async function writeOwnerId(userId) {
   const ownerFile = ownerFilePath();
   await fs.mkdir(path.dirname(ownerFile), { recursive: true });
   await fs.writeFile(ownerFile, `${userId}\n`, "utf8");
+}
+
+async function readGoogleConnection(userId) {
+  if (!useSupabase) return null;
+  const query = new URLSearchParams({
+    select: "google_refresh_token,google_email,google_connected_at",
+    telegram_user_id: `eq.${userId}`,
+    limit: "1"
+  });
+  const rows = await supabaseRequest(`/rest/v1/bot_owners?${query.toString()}`);
+  return rows[0] || null;
+}
+
+async function saveGoogleConnection(userId, refreshToken, email) {
+  if (!useSupabase) throw new Error("Google Calendar requires Supabase storage.");
+
+  await supabaseRequest(`/rest/v1/bot_owners?telegram_user_id=eq.${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    body: {
+      google_refresh_token: refreshToken,
+      google_email: email || null,
+      google_connected_at: new Date().toISOString()
+    }
+  });
 }
 
 function ownerFilePath() {

@@ -38,6 +38,9 @@ SUPABASE_SERVICE_ROLE_KEY=your_supabase_secret_or_service_role_key
 OPENAI_API_KEY=your_openai_api_key
 OPENAI_MODEL=gpt-5.4-mini
 GOOGLE_MAPS_API_KEY=your_google_maps_routes_api_key
+GOOGLE_CLIENT_ID=your_google_oauth_client_id
+GOOGLE_CLIENT_SECRET=your_google_oauth_client_secret
+GOOGLE_REDIRECT_URI=https://your-railway-domain/auth/google/callback
 ```
 
 4. Set the start command to:
@@ -57,6 +60,8 @@ If `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present, the bot stores ow
 If `OPENAI_API_KEY` is present, the bot uses OpenAI Structured Outputs to extract event details and generate introvert-friendly prep. Without it, it falls back to the simple rule-based parser.
 
 If `GOOGLE_MAPS_API_KEY` is present, the bot uses Google Routes API to calculate transit and driving travel times. Without it, it falls back to Google Maps links.
+
+If Google OAuth variables are present, use `/connect_calendar` in Telegram to connect read-only Google Calendar access. The bot will use matching calendar events to find exact locations when Luma hides guest-only addresses.
 
 Past events are deleted automatically two days after they start.
 
