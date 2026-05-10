@@ -220,6 +220,11 @@ async function handleMessage(message) {
     return;
   }
 
+  if (text === "/delete_event" || text.startsWith("/delete_event ")) {
+    await sendMessage(chatId, await deleteEventMessage(chatId, text));
+    return;
+  }
+
   if (text === "/debug_calendar") {
     await sendMessage(chatId, await debugCalendarMessage(chatId, userId));
     return;
@@ -1267,6 +1272,7 @@ function helpMessage() {
   return [
     "Commands:",
     "/events - list saved events",
+    "/delete_event 1 - delete a saved event by number",
     "/connect_calendar - connect Google Calendar",
     "/debug_calendar - show calendar events the bot can see near your latest saved event",
     "/settings - show current settings",
@@ -1382,10 +1388,41 @@ async function eventsMessage(chatId) {
   const events = await readEventsForChat(chatId);
   if (events.length === 0) return "No events saved yet. Paste a Luma link or event text to add one.";
 
-  return events
-    .slice(-10)
-    .map((event, index) => `${index + 1}. ${event.title}\n${formatDateTime(event.startsAt)}\n${event.location}`)
-    .join("\n\n");
+  return [
+    "Saved events:",
+    "",
+    ...events.map((event, index) => `${index + 1}. ${formatTitle(event.title)}\n${formatDateTime(event.startsAt)}\n${event.location}`),
+    "",
+    "To delete one, send /delete_event followed by the number.",
+    "Example: /delete_event 1"
+  ].join("\n\n");
+}
+
+async function deleteEventMessage(chatId, text) {
+  const events = await readEventsForChat(chatId);
+  if (events.length === 0) return "No saved events to delete.";
+
+  const number = Number(text.match(/^\/delete_event\s+(\d+)$/)?.[1]);
+  if (!Number.isInteger(number) || number < 1 || number > events.length) {
+    return [
+      "Which event should I delete?",
+      "",
+      ...events.map((event, index) => `${index + 1}. ${formatTitle(event.title)} - ${formatDateTime(event.startsAt)}`),
+      "",
+      "Send /delete_event followed by the number.",
+      "Example: /delete_event 1"
+    ].join("\n");
+  }
+
+  const event = events[number - 1];
+  await deleteEvent(event);
+  return [
+    "Deleted event:",
+    `${formatTitle(event.title)}`,
+    `${formatDateTime(event.startsAt)}`,
+    "",
+    "I will not send reminders for this event."
+  ].join("\n");
 }
 
 function scheduleReminderLoop() {
@@ -1676,6 +1713,18 @@ async function updateEvents(events) {
   }
 
   await writeEvents(events);
+}
+
+async function deleteEvent(event) {
+  if (useSupabase) {
+    await supabaseRequest(`/rest/v1/events?id=eq.${encodeURIComponent(event.id)}`, {
+      method: "DELETE"
+    });
+    return;
+  }
+
+  const events = await readEvents();
+  await writeEvents(events.filter((savedEvent) => savedEvent.id !== event.id));
 }
 
 async function deleteExpiredEvents() {
