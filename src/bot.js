@@ -1113,7 +1113,7 @@ function prepSuggestionLines(event) {
   const suggestions = [
     event.summary ? `Skim the event theme: ${event.summary}` : "",
     starters[0] ? `Keep one opener ready: ${starters[0]}` : "",
-    starters[1] ? `Think about one related project or question you can mention.` : ""
+    simpleEventQuestion(event, starters)
   ].filter(Boolean).slice(0, 3);
 
   const fallback = [
@@ -1124,6 +1124,23 @@ function prepSuggestionLines(event) {
 
   return (suggestions.length >= 3 ? suggestions : [...suggestions, ...fallback].slice(0, 3))
     .flatMap((suggestion) => [`- ${escapeHtml(suggestion)}`, ""]);
+}
+
+function simpleEventQuestion(event, starters) {
+  const candidate = cleanQuestion(starters[1] || event.prep?.socialMission || "");
+  if (candidate && candidate.length <= 90) return `Have a simple backup question: ${candidate}`;
+
+  const title = formatTitle(event.title);
+  const topic = title
+    .replace(/\b(ft|with|w\/)\b.*$/i, "")
+    .replace(/["']/g, "")
+    .trim();
+
+  if (topic && topic.length <= 60) {
+    return `Have a simple backup question: What made you interested in ${topic}?`;
+  }
+
+  return "Have a simple backup question: What made you interested in this event?";
 }
 
 function isWithinNext24Hours(isoString) {
