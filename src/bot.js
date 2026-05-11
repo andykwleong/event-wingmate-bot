@@ -220,6 +220,14 @@ async function handleMessage(message) {
     return;
   }
 
+  if (text === "/event_details" || text.startsWith("/event_details ") || text === "/events_details" || text.startsWith("/events_details ")) {
+    await sendMessage(chatId, await eventDetailsMessage(chatId, text), {
+      disable_web_page_preview: true,
+      parse_mode: "HTML"
+    });
+    return;
+  }
+
   if (text === "/delete_event" || text.startsWith("/delete_event ")) {
     await sendMessage(chatId, await deleteEventMessage(chatId, text));
     return;
@@ -1336,6 +1344,7 @@ function helpMessage() {
   return [
     "Commands:",
     "/events - list saved events",
+    "/event_details 1 - show full prep and travel for a saved event",
     "/delete_event 1 - delete a saved event by number",
     "/delete_all_events - delete all saved events after confirmation",
     "/connect_calendar - connect Google Calendar",
@@ -1463,8 +1472,34 @@ async function eventsMessage(chatId) {
     ].join("\n")),
     "",
     "To delete one, send /delete_event followed by the number.",
-    "Example: /delete_event 1"
+    "To see full prep, send /event_details followed by the number.",
+    "Examples: /delete_event 1 or /event_details 1"
   ].join("\n\n");
+}
+
+async function eventDetailsMessage(chatId, text) {
+  const events = await readEventsForChat(chatId);
+  if (events.length === 0) return "No saved events yet. Paste a Luma link or event text to add one.";
+
+  const number = Number(text.match(/^\/events?_details\s+(\d+)$/)?.[1]);
+  if (!Number.isInteger(number) || number < 1 || number > events.length) {
+    return compactMessage([
+      "Which event should I show?",
+      "",
+      ...events.map((event, index) => `${index + 1}. ${escapeHtml(formatTitle(event.title))} - ${escapeHtml(formatDateTime(event.startsAt))}`),
+      "",
+      "Send /event_details followed by the number.",
+      "Example: /event_details 1"
+    ]);
+  }
+
+  const event = events[number - 1];
+  if (!event.travel && shouldRouteToEventLocation(event)) {
+    await enrichEventWithTravel(event);
+    await updateEvent(event);
+  }
+
+  return eventPrepMessage(event);
 }
 
 async function deleteEventMessage(chatId, text) {
@@ -1804,6 +1839,19 @@ async function updateEvents(events) {
   }
 
   await writeEvents(events);
+}
+
+async function updateEvent(event) {
+  if (useSupabase) {
+    await supabaseRequest(`/rest/v1/events?id=eq.${encodeURIComponent(event.id)}`, {
+      method: "PATCH",
+      body: toSupabaseEvent(event)
+    });
+    return;
+  }
+
+  const events = await readEvents();
+  await writeEvents(events.map((savedEvent) => savedEvent.id === event.id ? event : savedEvent));
 }
 
 async function deleteEvent(event) {

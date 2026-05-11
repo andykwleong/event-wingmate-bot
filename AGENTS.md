@@ -52,6 +52,8 @@ https://event-wingmate-bot-production.up.railway.app/auth/google/callback
 - `/help` - command list
 - `/settings` - show config status, including Google Calendar connection
 - `/events` - list upcoming saved events with date/time and location status
+- `/event_details 1` - manually generate full prep and travel for a saved event
+- `/events_details 1` - alias for `/event_details 1`
 - `/delete_event 1` - delete a saved event by number
 - `/delete_all_events` - ask for confirmation before deleting all saved events for the chat
 - `/delete_all_events confirm` - delete all saved events for the chat and stop their reminders
@@ -64,6 +66,7 @@ https://event-wingmate-bot-production.up.railway.app/auth/google/callback
 - Plain text event details are supported if title, date/time, location, and description are in one message.
 - If an event starts within 24 hours, the bot immediately replies with full prep, travel, openers, and tiny mission.
 - If an event is more than 24 hours away, the bot sends a lighter saved confirmation with three prep suggestions.
+- `/event_details [number]` can manually generate full prep and travel for any saved event.
 - If Luma hides the exact location, the bot checks Google Calendar for a matching accepted event.
 - If Google Calendar has the location, that location overrides the hidden Luma status.
 - If no exact location is available, the bot says: `Location has yet to be updated`.
