@@ -241,7 +241,9 @@ async function handleMessage(message) {
   event.sourceText = enrichedText;
   await enrichEventWithOpenAI(event);
   await enrichEventWithCalendar(event);
-  await enrichEventWithTravel(event);
+  if (isWithinNext24Hours(event.startsAt)) {
+    await enrichEventWithTravel(event);
+  }
   const existingEvent = await findDuplicateEvent(event);
   if (existingEvent) {
     await sendMessage(chatId, duplicateEventMessage(existingEvent), {
@@ -1121,7 +1123,7 @@ function prepSuggestionLines(event) {
   ];
 
   return (suggestions.length >= 3 ? suggestions : [...suggestions, ...fallback].slice(0, 3))
-    .map((suggestion) => `- ${escapeHtml(suggestion)}`);
+    .flatMap((suggestion) => [`- ${escapeHtml(suggestion)}`, ""]);
 }
 
 function isWithinNext24Hours(isoString) {
@@ -1510,6 +1512,11 @@ async function sendDueReminders() {
 
   for (const event of events) {
     const startsAt = new Date(event.startsAt).getTime();
+    if (!event.travel && shouldRouteToEventLocation(event)) {
+      await enrichEventWithTravel(event);
+      changed = true;
+    }
+
     const dueReminders = [
       {
         key: "dayBefore",
