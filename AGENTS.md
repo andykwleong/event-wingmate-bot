@@ -53,6 +53,8 @@ https://event-wingmate-bot-production.up.railway.app/auth/google/callback
 - `/settings` - show config status, including Google Calendar connection
 - `/events` - list saved events
 - `/delete_event 1` - delete a saved event by number
+- `/delete_all_events` - ask for confirmation before deleting all saved events for the chat
+- `/delete_all_events confirm` - delete all saved events for the chat and stop their reminders
 - `/connect_calendar` - start Google Calendar OAuth
 - `/debug_calendar` - show calendar events visible near the latest saved event time
 
@@ -66,6 +68,8 @@ https://event-wingmate-bot-production.up.railway.app/auth/google/callback
 - Google Maps routing only runs when a specific location is available.
 - Duplicate Luma links are deduped by Luma slug.
 - Plain text events are deduped by normalized title and start time.
+- Deleting an event removes it from Supabase, so future reminders stop.
+- Bulk deletion removes all events for the current Telegram chat after explicit confirmation.
 - Events are deleted automatically from Supabase two days after the event start.
 - Day-before reminders are scheduled 24 hours before event start.
 - Leave-time reminders are scheduled 1 hour before event start.
