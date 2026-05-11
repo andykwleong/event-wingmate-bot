@@ -1185,7 +1185,7 @@ function travelLines(event, transitUrl, drivingUrl) {
     ];
   }
 
-  if (!event.travel?.transit && !event.travel?.driving) {
+  if (!hasTravelDetails(event)) {
     return [
       `Public transport: ${escapeHtml(transitUrl)}`,
       `Car: ${escapeHtml(drivingUrl)}`
@@ -1208,6 +1208,10 @@ function travelLines(event, transitUrl, drivingUrl) {
 
   lines.push(`Open in Maps: <a href="${escapeHtmlAttribute(transitUrl)}">Here</a>`);
   return lines;
+}
+
+function hasTravelDetails(event) {
+  return Boolean(event.travel?.transit || event.travel?.driving);
 }
 
 function formatOpeners(conversationStarters) {
@@ -1494,7 +1498,7 @@ async function eventDetailsMessage(chatId, text) {
   }
 
   const event = events[number - 1];
-  if (!event.travel && shouldRouteToEventLocation(event)) {
+  if (!hasTravelDetails(event) && shouldRouteToEventLocation(event)) {
     await enrichEventWithTravel(event);
     await updateEvent(event);
   }
@@ -1564,7 +1568,7 @@ async function sendDueReminders() {
 
   for (const event of events) {
     const startsAt = new Date(event.startsAt).getTime();
-    if (!event.travel && shouldRouteToEventLocation(event)) {
+    if (!hasTravelDetails(event) && shouldRouteToEventLocation(event)) {
       await enrichEventWithTravel(event);
       changed = true;
     }
