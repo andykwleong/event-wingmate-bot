@@ -253,7 +253,7 @@ async function handleMessage(message) {
 
   await saveEvent(event);
 
-  await sendMessage(chatId, eventPrepMessage(event), {
+  await sendMessage(chatId, eventResponseMessage(event), {
     disable_web_page_preview: true,
     parse_mode: "HTML"
   });
@@ -1089,6 +1089,46 @@ function eventPrepMessage(event) {
   ]);
 }
 
+function eventResponseMessage(event) {
+  return isWithinNext24Hours(event.startsAt) ? eventPrepMessage(event) : futureEventSavedMessage(event);
+}
+
+function futureEventSavedMessage(event) {
+  return compactMessage([
+    `Saved: ${escapeHtml(formatTitle(event.title))}`,
+    `When: ${escapeHtml(formatDateTime(event.startsAt))}`,
+    `Where: ${escapeHtml(shouldRouteToEventLocation(event) ? event.location : "Location has yet to be updated")}`,
+    "",
+    "I’ll send the full prep and travel reminder 24 hours before the event.",
+    "",
+    "Prep ideas:",
+    ...prepSuggestionLines(event)
+  ]);
+}
+
+function prepSuggestionLines(event) {
+  const starters = (event.prep?.conversationStarters || []).slice(0, 2);
+  const suggestions = [
+    event.summary ? `Skim the event theme: ${event.summary}` : "",
+    starters[0] ? `Keep one opener ready: ${starters[0]}` : "",
+    starters[1] ? `Think about one related project or question you can mention.` : ""
+  ].filter(Boolean).slice(0, 3);
+
+  const fallback = [
+    "Check who is hosting and why the topic matters to you.",
+    "Prepare one simple opener you can say without overthinking.",
+    "Decide one small outcome that would make attending worthwhile."
+  ];
+
+  return (suggestions.length >= 3 ? suggestions : [...suggestions, ...fallback].slice(0, 3))
+    .map((suggestion) => `- ${escapeHtml(suggestion)}`);
+}
+
+function isWithinNext24Hours(isoString) {
+  const startsAt = new Date(isoString).getTime();
+  return startsAt - Date.now() <= 24 * 60 * 60 * 1000;
+}
+
 function duplicateEventMessage(event) {
   return compactMessage([
     "This event has been saved previously.",
@@ -1395,9 +1435,13 @@ async function eventsMessage(chatId) {
   if (events.length === 0) return "No events saved yet. Paste a Luma link or event text to add one.";
 
   return [
-    "Saved events:",
+    "Upcoming events:",
     "",
-    ...events.map((event, index) => `${index + 1}. ${formatTitle(event.title)}\n${formatDateTime(event.startsAt)}\n${event.location}`),
+    ...events.map((event, index) => [
+      `${index + 1}. ${formatTitle(event.title)}`,
+      `When: ${formatDateTime(event.startsAt)}`,
+      `Where: ${shouldRouteToEventLocation(event) ? event.location : "Location has yet to be updated"}`
+    ].join("\n")),
     "",
     "To delete one, send /delete_event followed by the number.",
     "Example: /delete_event 1"
