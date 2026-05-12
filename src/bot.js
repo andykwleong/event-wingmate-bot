@@ -1580,7 +1580,11 @@ async function sendDueReminders() {
       {
         key: "dayBefore",
         dueAt: startsAt - 24 * 60 * 60 * 1000,
-        message: dayBeforeMessage(event)
+        message: dayBeforeMessage(event),
+        options: {
+          disable_web_page_preview: true,
+          parse_mode: "HTML"
+        }
       },
       {
         key: "leaveTime",
@@ -1599,7 +1603,7 @@ async function sendDueReminders() {
       const alreadySent = event.reminders?.[reminder.key] || sentReminderKeys.has(reminderKey);
       const isDue = now >= reminder.dueAt && now < reminder.dueAt + 10 * 60 * 1000;
       if (!alreadySent && isDue) {
-        await sendMessage(event.chatId, reminder.message, { disable_web_page_preview: true });
+        await sendMessage(event.chatId, reminder.message, reminder.options || { disable_web_page_preview: true });
         event.reminders = { ...event.reminders, [reminder.key]: true };
         sentReminderKeys.add(reminderKey);
         changed = true;
@@ -1611,21 +1615,28 @@ async function sendDueReminders() {
 }
 
 function dayBeforeMessage(event) {
-  const opener = event.prep?.conversationStarters?.[0] || talkingPointsFor(event.eventType)[0];
-  const transitLine = !shouldRouteToEventLocation(event)
-    ? "Travel time: not available yet because the venue is not specific."
-    : event.travel?.transit
-    ? `Public transport: ${formatDuration(event.travel.transit.durationSeconds)}${leaveByText(event.startsAt, event.travel.transit.durationSeconds)}`
-    : `Public transport: ${mapsUrl(config.homeAddress, event.location, "transit")}`;
-  return [
-    `Tomorrow: ${event.title}`,
+  const canRoute = shouldRouteToEventLocation(event);
+  const transitUrl = canRoute ? mapsUrl(config.homeAddress, event.location, "transit") : "";
+  const drivingUrl = canRoute ? mapsUrl(config.homeAddress, event.location, "driving") : "";
+  const conversationStarters = event.prep?.conversationStarters || [];
+
+  return compactMessage([
+    `Tomorrow: ${escapeHtml(formatTitle(event.title))}`,
+    `When: ${escapeHtml(formatDateTime(event.startsAt))}`,
+    `Where: ${escapeHtml(canRoute ? event.location : "Location has yet to be updated")}`,
     "",
-    `Venue: ${event.location}`,
-    transitLine,
+    event.summary ? "Event Summary:" : "",
+    event.summary ? escapeHtml(event.summary) : "",
     "",
-    "Pick one opener now so your future self has less to carry:",
-    opener
-  ].join("\n");
+    "Getting there:",
+    ...travelLines(event, transitUrl, drivingUrl),
+    "",
+    conversationStarters.length ? "Easy openers:" : "",
+    ...formatOpeners(conversationStarters),
+    conversationStarters.length ? "" : "",
+    "Tiny mission:",
+    escapeHtml(missionQuestion(event))
+  ]);
 }
 
 function leaveTimeMessage(event) {

@@ -77,7 +77,7 @@ https://event-wingmate-bot-production.up.railway.app/auth/google/callback
 - Deleting an event removes it from Supabase, so future reminders stop.
 - Bulk deletion removes all events for the current Telegram chat after explicit confirmation.
 - Events are deleted automatically from Supabase two days after the event start.
-- Day-before reminders are scheduled 24 hours before event start.
+- Day-before reminders are scheduled 24 hours before event start and should include the full prep format: venue, summary, transit, car, map link, three openers, and tiny mission.
 - Leave-time reminders are scheduled 1 hour before event start.
 - Networking reminders are scheduled 30 minutes after event start unless a networking time is extracted.
 
