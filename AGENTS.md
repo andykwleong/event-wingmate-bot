@@ -67,6 +67,7 @@ https://event-wingmate-bot-production.up.railway.app/auth/google/callback
 - Plain text event details are supported if title, date/time, location, and description are in one message.
 - If an event starts within 24 hours, the bot immediately replies with full prep, travel, openers, and tiny mission.
 - If an event is more than 24 hours away, the bot sends a lighter saved confirmation with three prep suggestions.
+- Future-event prep suggestions should prefer event-specific questions over generic openers like "What brought you here?"
 - `/event_details [number]` can manually generate full prep and travel for any saved event.
 - If Luma hides the exact location, the bot checks Google Calendar for a matching accepted event.
 - If Google Calendar has the location, that location overrides the hidden Luma status.

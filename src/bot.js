@@ -1117,11 +1117,12 @@ function futureEventSavedMessage(event) {
 }
 
 function prepSuggestionLines(event) {
-  const starters = (event.prep?.conversationStarters || []).slice(0, 2);
+  const starters = event.prep?.conversationStarters || [];
+  const opener = prepOpenerForEvent(event, starters);
   const suggestions = [
     event.summary ? `Skim the event theme: ${event.summary}` : "",
-    starters[0] ? `Keep one opener ready: ${starters[0]}` : "",
-    simpleEventQuestion(event, starters)
+    opener ? `Keep one opener ready: ${opener}` : "",
+    simpleEventQuestion(event, [opener].filter(Boolean))
   ].filter(Boolean).slice(0, 3);
 
   const fallback = [
@@ -1134,9 +1135,26 @@ function prepSuggestionLines(event) {
     .flatMap((suggestion) => [`- ${escapeHtml(suggestion)}`, ""]);
 }
 
-function simpleEventQuestion(event, starters) {
-  const candidate = cleanQuestion(starters[1] || event.prep?.socialMission || "");
-  if (candidate && candidate.length <= 90) return `Have a simple backup question: ${candidate}`;
+function prepOpenerForEvent(event, starters) {
+  const specificStarter = starters
+    .map(cleanQuestion)
+    .find((starter) => starter && !isGenericOpener(starter) && starter.length <= 90);
+  if (specificStarter) return specificStarter;
+
+  return eventSpecificQuestion(event, "opener");
+}
+
+function simpleEventQuestion(event, usedQuestions = []) {
+  const used = usedQuestions.map(cleanQuestion).filter(Boolean);
+  const candidate = eventSpecificQuestion(event, "backup");
+  if (candidate && !used.some((question) => sameQuestion(question, candidate))) {
+    return `Have a simple backup question: ${candidate}`;
+  }
+
+  const mission = cleanQuestion(event.prep?.socialMission || "");
+  if (mission && mission.length <= 90 && !isGenericOpener(mission) && !used.some((question) => sameQuestion(question, mission))) {
+    return `Have a simple backup question: ${mission}`;
+  }
 
   const title = formatTitle(event.title);
   const topic = title
@@ -1149,6 +1167,46 @@ function simpleEventQuestion(event, starters) {
   }
 
   return "Have a simple backup question: What made you interested in this event?";
+}
+
+function eventSpecificQuestion(event, purpose) {
+  const text = `${event.title || ""} ${event.summary || ""} ${(event.prep?.talkingPoints || []).join(" ")}`.toLowerCase();
+
+  if (matchesAny(text, ["magic patterns", "design tooling", "prototype", "ui"])) {
+    return purpose === "opener"
+      ? "Have you tried Magic Patterns before?"
+      : "What would you want an AI design tool to help with?";
+  }
+
+  if (matchesAny(text, ["kill your saas", "zo computer", "minimax", "replace common saas", "personal server"])) {
+    return purpose === "opener"
+      ? "Which SaaS tool would you love to replace?"
+      : "What would you try building if setup was easy?";
+  }
+
+  if (matchesAny(text, ["convex", "real-time sync", "backend state"])) {
+    return purpose === "opener"
+      ? "Have you used Convex before?"
+      : "Where would real-time sync help in your app?";
+  }
+
+  if (matchesAny(text, ["ai engineer", "llm", "agent", "ai app"])) {
+    return purpose === "opener"
+      ? "Which AI topic are you most curious about?"
+      : "Have you built anything with AI yet?";
+  }
+
+  if (matchesAny(text, ["workshop", "hands-on", "demo"])) {
+    return purpose === "opener"
+      ? "Are you planning to try the hands-on part?"
+      : "What are you hoping to learn today?";
+  }
+
+  return "";
+}
+
+function isGenericOpener(question) {
+  return /what brought you (here|by|tonight|today)|what caught your eye|what are you hoping|get out of|first time/i.test(question);
 }
 
 function isWithinNext24Hours(isoString) {
