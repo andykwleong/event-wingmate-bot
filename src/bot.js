@@ -1689,9 +1689,9 @@ async function deleteEventMessage(chatId, text) {
   }
 
   const event = events[number - 1];
-  await deleteEvent(event);
+  const deletedCount = await deleteDuplicateEvents(event);
   return [
-    "Deleted event:",
+    deletedCount > 1 ? `Deleted ${deletedCount} duplicate copies of:` : "Deleted event:",
     `${formatTitle(event.title)}`,
     `${formatDateTime(event.startsAt)}`,
     "",
@@ -2045,6 +2045,32 @@ async function deleteEvent(event) {
 
   const events = await readEvents();
   await writeEvents(events.filter((savedEvent) => savedEvent.id !== event.id));
+}
+
+async function deleteDuplicateEvents(event) {
+  const fingerprint = eventFingerprint(event);
+
+  if (useSupabase) {
+    const query = new URLSearchParams({
+      select: "*",
+      telegram_chat_id: `eq.${event.chatId}`
+    });
+    const rows = await supabaseRequest(`/rest/v1/events?${query.toString()}`);
+    const matchingEvents = rows.map(fromSupabaseEvent)
+      .filter((savedEvent) => eventFingerprint(savedEvent) === fingerprint);
+
+    for (const savedEvent of matchingEvents) {
+      await deleteEvent(savedEvent);
+    }
+    return matchingEvents.length;
+  }
+
+  const events = await readEvents();
+  const activeEvents = events.filter((savedEvent) => {
+    return savedEvent.chatId !== event.chatId || eventFingerprint(savedEvent) !== fingerprint;
+  });
+  await writeEvents(activeEvents);
+  return events.length - activeEvents.length;
 }
 
 async function deleteEventsForChat(chatId) {

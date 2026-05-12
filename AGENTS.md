@@ -76,7 +76,7 @@ https://event-wingmate-bot-production.up.railway.app/auth/google/callback
 - Duplicate Luma links are deduped by Luma slug.
 - When a duplicate event is pasted, fresh extraction/calendar/travel data should update the saved event if it fills missing details.
 - Plain text events are deduped by normalized title and start time.
-- Deleting an event removes it from Supabase, so future reminders stop.
+- Deleting an event removes all saved copies with the same event fingerprint from Supabase, so future reminders stop.
 - Bulk deletion removes all events for the current Telegram chat after explicit confirmation.
 - Events are deleted automatically from Supabase two days after the event start.
 - Day-before reminders are scheduled 24 hours before event start and should include the full prep format: venue, summary, transit, car, map link, three openers, and tiny mission.
