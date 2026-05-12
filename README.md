@@ -1,96 +1,223 @@
 # Event Wingmate Telegram Bot
 
-A Telegram-first MVP for attending events with less friction:
+Event Wingmate is a private Telegram bot that helps you prepare for events, get there on time, and actually talk to people once you arrive.
 
-- Paste a Luma link or event text.
-- Get extracted event details.
-- Get public transport and car directions links.
-- Get introvert-friendly talking points.
-- Receive day-before, leave-time, and networking nudges.
+Paste a Luma link or event text, and the bot can save the event, extract the details, look up hidden Luma locations from your Google Calendar, calculate travel time, and generate low-pressure conversation prompts.
 
-## Setup
+## Features
 
-1. Create a Telegram bot with [@BotFather](https://t.me/BotFather) and copy the token.
-2. Copy `.env.example` to `.env`.
-3. Fill in `TELEGRAM_BOT_TOKEN` and `HOME_ADDRESS`.
-4. Run:
+- Save events from Luma links or plain event text
+- Extract event name, date/time, location, summary, and prep prompts with OpenAI
+- Look up exact event locations from Google Calendar when Luma hides guest-only addresses
+- Calculate public transport and driving time with Google Maps Routes API
+- Send reminders 24 hours before the event, before leaving, and around networking time
+- Deduplicate repeated event links so reminders are not duplicated
+- Delete one saved event or bulk-delete all saved events from Telegram
+- Keep the bot private to one Telegram user
+
+## How It Works
+
+```text
+Telegram
+  -> Railway-hosted Node.js bot
+  -> Luma / event page fetch
+  -> OpenAI extraction
+  -> Google Calendar location lookup
+  -> Google Maps Routes API
+  -> Supabase storage
+  -> Telegram reply and reminders
+```
+
+## Telegram Commands
+
+- `/start` - welcome message
+- `/help` - command list
+- `/settings` - configuration and connection status
+- `/events` - list upcoming saved events
+- `/event_details 1` - manually generate full prep and travel for event 1
+- `/events_details 1` - alias for `/event_details 1`
+- `/delete_event 1` - delete event 1 and stop its reminders
+- `/delete_all_events` - ask for confirmation before deleting all saved events
+- `/delete_all_events confirm` - delete all saved events for the current chat
+- `/connect_calendar` - connect read-only Google Calendar access
+- `/debug_calendar` - show calendar events visible to the bot near the latest saved event
+
+## Requirements
+
+- Node.js 20+
+- Telegram bot token from [BotFather](https://t.me/BotFather)
+- Supabase project
+- OpenAI API key
+- Google Maps Platform key with Routes API enabled
+- Google Cloud OAuth client with Google Calendar API enabled
+- Railway account for 24/7 hosting
+
+The bot can run locally with fewer services, but the full hosted workflow expects all of the above.
+
+## Environment Variables
+
+Create a local `.env` file from `.env.example` for local testing, and set the same variables in Railway for deployment.
+
+```bash
+TELEGRAM_BOT_TOKEN=
+HOME_ADDRESS=
+DEFAULT_TIMEZONE=Asia/Singapore
+ALLOWED_USER_ID=
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5.4-mini
+GOOGLE_MAPS_API_KEY=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REDIRECT_URI=
+DATA_FILE=./data/events.json
+```
+
+Never commit real secrets. Keep them in Railway variables or your local `.env`.
+
+## Local Setup
+
+1. Clone the repo.
+2. Create a Telegram bot with BotFather.
+3. Copy `.env.example` to `.env`.
+4. Fill in at least:
+
+```bash
+TELEGRAM_BOT_TOKEN=
+HOME_ADDRESS=
+DEFAULT_TIMEZONE=Asia/Singapore
+```
+
+5. Run the bot:
 
 ```bash
 npm start
 ```
 
-## Deploy on Railway
+6. In Telegram, send:
 
-Use Railway when you want the bot to stay online 24/7 instead of running from your laptop.
+```text
+/start
+```
 
-1. Push this project to GitHub.
-2. In Railway, create a new project from the GitHub repo.
-3. Add these variables in Railway:
+Without Supabase, the bot falls back to local JSON storage for testing.
+
+## Supabase Setup
+
+Create these tables in Supabase:
+
+```sql
+create table if not exists bot_owners (
+  id bigint primary key generated always as identity,
+  telegram_user_id text not null unique,
+  google_refresh_token text,
+  google_email text,
+  google_connected_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists events (
+  id text primary key,
+  telegram_chat_id bigint not null,
+  telegram_user_id text not null,
+  title text not null,
+  url text,
+  raw_text text,
+  location text not null,
+  event_type text not null,
+  starts_at timestamptz not null,
+  summary text,
+  audience text,
+  networking_at timestamptz,
+  prep jsonb not null default '{}'::jsonb,
+  travel jsonb not null default '{}'::jsonb,
+  reminders jsonb not null default '{"dayBefore": false, "leaveTime": false, "networking": false}'::jsonb,
+  created_at timestamptz not null default now(),
+  delete_after timestamptz not null
+);
+
+create index if not exists events_starts_at_idx on events (starts_at);
+create index if not exists events_delete_after_idx on events (delete_after);
+create index if not exists events_telegram_user_id_idx on events (telegram_user_id);
+```
+
+Use a Supabase secret/service-role key only in a backend environment such as Railway. Do not expose it in client-side code.
+
+## Google Calendar Setup
+
+1. In Google Cloud, enable Google Calendar API.
+2. Configure OAuth consent.
+3. Create an OAuth client of type `Web application`.
+4. Add this redirect URI:
+
+```text
+https://your-railway-domain/auth/google/callback
+```
+
+5. Set these Railway variables:
 
 ```bash
-TELEGRAM_BOT_TOKEN=your_botfather_token
-HOME_ADDRESS=your usual starting address
-DEFAULT_TIMEZONE=Asia/Singapore
-ALLOWED_USER_ID=your_telegram_user_id
-DATA_FILE=./data/events.json
-SUPABASE_URL=your_supabase_project_url
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_secret_or_service_role_key
-OPENAI_API_KEY=your_openai_api_key
-OPENAI_MODEL=gpt-5.4-mini
-GOOGLE_MAPS_API_KEY=your_google_maps_routes_api_key
-GOOGLE_CLIENT_ID=your_google_oauth_client_id
-GOOGLE_CLIENT_SECRET=your_google_oauth_client_secret
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
 GOOGLE_REDIRECT_URI=https://your-railway-domain/auth/google/callback
 ```
 
-4. Set the start command to:
+6. In Telegram, run:
+
+```text
+/connect_calendar
+```
+
+The bot requests read-only calendar access. This is used to find exact event addresses after you register for Luma events that hide the location from public visitors.
+
+## Railway Deployment
+
+1. Push this repo to GitHub.
+2. Create a Railway project from the GitHub repo.
+3. Set the start command:
 
 ```bash
 npm start
 ```
 
-5. Open the Railway app URL. It should say:
+4. Add all required environment variables in Railway.
+5. Ensure the public networking port points to `3000`, or use Railway's injected `PORT`.
+6. Open:
 
 ```text
-Event Wingmate bot is running.
+https://your-railway-domain/health
 ```
 
-If `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present, the bot stores owners and events in Supabase. Without them, it falls back to local JSON storage for testing.
+It should return:
 
-If `OPENAI_API_KEY` is present, the bot uses OpenAI Structured Outputs to extract event details and generate introvert-friendly prep. Without it, it falls back to the simple rule-based parser.
-
-If `GOOGLE_MAPS_API_KEY` is present, the bot uses Google Routes API to calculate transit and driving travel times. Without it, it falls back to Google Maps links.
-
-If Google OAuth variables are present, use `/connect_calendar` in Telegram to connect read-only Google Calendar access. The bot will use matching calendar events to find exact locations when Luma hides guest-only addresses.
-
-Past events are deleted automatically two days after they start.
-
-## Locking the Bot
-
-The bot is private by default after the first `/start`.
-
-The first Telegram user who sends `/start` becomes the owner. Everyone else will see:
-
-```text
-Sorry, this bot is private.
+```json
+{"ok":true,"service":"event-wingmate"}
 ```
 
-You can see your Telegram user ID with `/settings`. If you prefer to lock it manually, put that ID into `ALLOWED_USER_ID` in `bot-settings.txt`.
+## Event Timing Behavior
 
-## Commands
+- If an event starts within 24 hours, the bot immediately returns full prep, travel, openers, and a tiny mission.
+- If an event is more than 24 hours away, the bot sends a lighter saved confirmation with three prep ideas.
+- Use `/event_details 1` to manually generate full prep and travel for any saved event.
 
-- `/start` - intro and setup help
-- `/help` - command list
-- `/events` - list saved events
-- `/settings` - show current bot settings
-- Send any event text or Luma link to save an event and get prep
+## Privacy And Security
 
-## MVP Notes
+- The bot is private by default after the first `/start`, or you can set `ALLOWED_USER_ID`.
+- Event data and Google refresh tokens are stored in Supabase.
+- API keys should live only in Railway variables or local `.env`.
+- Do not commit `.env`, `bot-settings.txt`, or `data/`.
+- Google Calendar access is read-only.
 
-This first version uses Telegram long polling and local JSON storage. Travel support generates Google Maps directions links for public transport and driving. A later production version should add:
+## Limitations
 
-- Luma page fetching and structured parsing
-- Google Calendar integration
-- Google Maps Directions API or Citymapper integration
-- Persistent database
-- Hosted webhook deployment
+- Luma sometimes hides exact locations from public visitors. The bot can only see those addresses through Google Calendar after you register or accept the event.
+- Travel estimates are based on Google Routes API and may differ from Google Maps when opened later because live conditions change.
+- Plain text invites should include title, date/time, location, and description in one message.
+- Image/screenshot invite parsing is not implemented.
+
+## License
+
+Copyright (C) 2026 Andy Leong.
+
+This project is licensed under the GNU Affero General Public License v3.0 or later. See [LICENSE](LICENSE).

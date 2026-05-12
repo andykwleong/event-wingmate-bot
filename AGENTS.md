@@ -13,6 +13,7 @@ The bot accepts a Luma link or event text, extracts event details, checks Google
 - Runtime: Node.js, no external npm dependencies currently
 - Start command: `npm start`
 - Syntax check: `npm run check`
+- License: AGPL-3.0-or-later
 
 ## Hosting And Services
 
@@ -120,6 +121,7 @@ Open in Maps: <a href="...">Here</a>
 
 - Keep secrets in Railway variables only.
 - Keep `bot-settings.txt`, `.env`, and `data/` ignored.
+- Keep `README.md`, `SECURITY.md`, `LICENSE`, and `AGENTS.md` current before making the repo public.
 - Run `npm run check` before committing.
 - Push to GitHub to trigger Railway redeploy.
 - If Google Calendar location lookup fails, use `/debug_calendar` first before changing matching logic.

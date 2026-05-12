@@ -1359,7 +1359,10 @@ function helpMessage() {
     "You can paste:",
     "- A Luma link",
     "- Event title, date, venue, and description",
-    "- Any event invite text"
+    "- Any event invite text",
+    "",
+    "Source code:",
+    "https://github.com/andykwleong/event-wingmate-bot"
   ].join("\n");
 }
 
