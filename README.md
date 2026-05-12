@@ -10,9 +10,10 @@ Paste a Luma link or event text, and the bot can save the event, extract the det
 - Extract event name, date/time, location, summary, and prep prompts with OpenAI
 - Look up exact event locations from Google Calendar when Luma hides guest-only addresses
 - Calculate public transport and driving time with Google Maps Routes API
-- Send reminders 24 hours before the event, before leaving, and around networking time
-- Deduplicate repeated event links so reminders are not duplicated
-- Delete one saved event or bulk-delete all saved events from Telegram
+- Send full prep 24 hours before the event, a leave-time reminder, and a networking nudge
+- Generate event-specific prep questions and vary wording so prompts do not feel repeated
+- Deduplicate repeated event links so reminders are not duplicated, while refreshing saved events when better details are found later
+- Delete one saved event, all duplicate copies of that event, or bulk-delete all saved events from Telegram
 - Keep the bot private to one Telegram user
 
 ## How It Works
@@ -36,7 +37,7 @@ Telegram
 - `/events` - list upcoming saved events
 - `/event_details 1` - manually generate full prep and travel for event 1
 - `/events_details 1` - alias for `/event_details 1`
-- `/delete_event 1` - delete event 1 and stop its reminders
+- `/delete_event 1` - delete event 1, including saved duplicate copies, and stop its reminders
 - `/delete_all_events` - ask for confirmation before deleting all saved events
 - `/delete_all_events confirm` - delete all saved events for the current chat
 - `/connect_calendar` - connect read-only Google Calendar access
@@ -199,7 +200,18 @@ It should return:
 
 - If an event starts within 24 hours, the bot immediately returns full prep, travel, openers, and a tiny mission.
 - If an event is more than 24 hours away, the bot sends a lighter saved confirmation with three prep ideas.
+- Future-event prep ideas prefer event-specific questions over generic openers, and wording varies within event categories.
+- The 24-hour reminder uses the full prep format: venue, summary, transit, car, map link, three openers, and tiny mission.
 - Use `/event_details 1` to manually generate full prep and travel for any saved event.
+
+## Duplicate And Deletion Behavior
+
+- Luma events are deduplicated by their Luma slug.
+- Plain text events are deduplicated by normalized title and start time.
+- If you paste the same event again and the fresh lookup finds better details, such as a Google Calendar location or travel time, the saved event is updated.
+- `/delete_event 1` deletes all saved copies with the same fingerprint, so old test duplicates do not keep triggering reminders.
+- `/delete_all_events confirm` deletes every saved event for the current Telegram chat.
+- Expired events are automatically removed about two days after the event starts.
 
 ## Privacy And Security
 
