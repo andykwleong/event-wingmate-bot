@@ -254,7 +254,10 @@ async function handleMessage(message) {
   }
   const existingEvent = await findDuplicateEvent(event);
   if (existingEvent) {
-    await sendMessage(chatId, duplicateEventMessage(existingEvent), {
+    const mergedEvent = mergeDuplicateEvent(existingEvent, event);
+    if (eventNeedsUpdate(existingEvent, mergedEvent)) await updateEvent(mergedEvent);
+
+    await sendMessage(chatId, duplicateEventMessage(mergedEvent), {
       disable_web_page_preview: true,
       parse_mode: "HTML"
     });
@@ -1273,6 +1276,59 @@ function duplicateEventMessage(event) {
     "",
     "I will only send one set of reminders for this event."
   ]);
+}
+
+function mergeDuplicateEvent(savedEvent, freshEvent) {
+  const merged = {
+    ...savedEvent,
+    title: freshEvent.title || savedEvent.title,
+    url: freshEvent.url || savedEvent.url,
+    startsAt: freshEvent.startsAt || savedEvent.startsAt,
+    eventType: freshEvent.eventType || savedEvent.eventType,
+    summary: freshEvent.summary || savedEvent.summary,
+    audience: freshEvent.audience || savedEvent.audience,
+    networkingAt: freshEvent.networkingAt || savedEvent.networkingAt,
+    rawText: savedEvent.rawText || freshEvent.rawText,
+    sourceText: freshEvent.sourceText || savedEvent.sourceText,
+    prep: hasUsefulPrep(freshEvent.prep) ? freshEvent.prep : savedEvent.prep,
+    travel: hasTravelDetails(freshEvent) ? freshEvent.travel : savedEvent.travel,
+    deleteAfter: freshEvent.deleteAfter || savedEvent.deleteAfter,
+    reminders: savedEvent.reminders || freshEvent.reminders,
+    createdAt: savedEvent.createdAt || freshEvent.createdAt
+  };
+
+  if (hasBetterLocation(freshEvent, savedEvent)) {
+    merged.location = freshEvent.location;
+    merged.locationSource = freshEvent.locationSource;
+    merged.prep = {
+      ...(merged.prep || {}),
+      missingInfo: []
+    };
+  }
+
+  return merged;
+}
+
+function hasUsefulPrep(prep) {
+  return Boolean(
+    prep?.conversationStarters?.length
+    || prep?.talkingPoints?.length
+    || prep?.socialMission
+    || prep?.encouragement
+  );
+}
+
+function hasBetterLocation(freshEvent, savedEvent) {
+  if (!shouldRouteToEventLocation(freshEvent)) return false;
+  if (!shouldRouteToEventLocation(savedEvent)) return true;
+  return hasSpecificLocation(freshEvent.location) && freshEvent.location !== savedEvent.location;
+}
+
+function eventNeedsUpdate(before, after) {
+  const fields = ["title", "url", "location", "startsAt", "eventType", "summary", "audience", "networkingAt", "deleteAfter"];
+  return fields.some((field) => before[field] !== after[field])
+    || JSON.stringify(before.prep || null) !== JSON.stringify(after.prep || null)
+    || JSON.stringify(before.travel || null) !== JSON.stringify(after.travel || null);
 }
 
 function compactMessage(lines) {

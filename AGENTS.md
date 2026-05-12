@@ -74,6 +74,7 @@ https://event-wingmate-bot-production.up.railway.app/auth/google/callback
 - If no exact location is available, the bot says: `Location has yet to be updated`.
 - Google Maps routing only runs when a specific location is available.
 - Duplicate Luma links are deduped by Luma slug.
+- When a duplicate event is pasted, fresh extraction/calendar/travel data should update the saved event if it fills missing details.
 - Plain text events are deduped by normalized title and start time.
 - Deleting an event removes it from Supabase, so future reminders stop.
 - Bulk deletion removes all events for the current Telegram chat after explicit confirmation.
