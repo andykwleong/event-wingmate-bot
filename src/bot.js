@@ -1171,38 +1171,87 @@ function simpleEventQuestion(event, usedQuestions = []) {
 
 function eventSpecificQuestion(event, purpose) {
   const text = `${event.title || ""} ${event.summary || ""} ${(event.prep?.talkingPoints || []).join(" ")}`.toLowerCase();
+  const seed = `${event.title || ""}:${event.startsAt || ""}:${purpose}`;
 
   if (matchesAny(text, ["magic patterns", "design tooling", "prototype", "ui"])) {
-    return purpose === "opener"
-      ? "Have you tried Magic Patterns before?"
-      : "What would you want an AI design tool to help with?";
+    return pickQuestion(seed, purpose === "opener"
+      ? [
+        "Have you tried Magic Patterns before?",
+        "Are you using AI for design work yet?",
+        "What kind of prototype are you working on?"
+      ]
+      : [
+        "What would make design tools easier for you?",
+        "Which part of app design slows you down most?",
+        "What would you want to prototype faster?"
+      ]);
   }
 
   if (matchesAny(text, ["kill your saas", "zo computer", "minimax", "replace common saas", "personal server"])) {
-    return purpose === "opener"
-      ? "Which SaaS tool would you love to replace?"
-      : "What would you try building if setup was easy?";
+    return pickQuestion(seed, purpose === "opener"
+      ? [
+        "Which SaaS tool would you love to replace?",
+        "Are you trying to automate anything right now?",
+        "Have you used Zo or MiniMax before?"
+      ]
+      : [
+        "What would you try building if setup was easy?",
+        "Which paid tool feels too annoying to keep?",
+        "What workflow would you make simpler first?"
+      ]);
   }
 
   if (matchesAny(text, ["convex", "real-time sync", "backend state"])) {
-    return purpose === "opener"
-      ? "Have you used Convex before?"
-      : "Where would real-time sync help in your app?";
+    return pickQuestion(seed, purpose === "opener"
+      ? [
+        "Have you used Convex before?",
+        "Are you building anything with real-time updates?",
+        "What kind of app are you working on?"
+      ]
+      : [
+        "Where would real-time sync help in your app?",
+        "What backend part do you usually find painful?",
+        "What made Convex interesting to you?"
+      ]);
   }
 
   if (matchesAny(text, ["ai engineer", "llm", "agent", "ai app"])) {
-    return purpose === "opener"
-      ? "Which AI topic are you most curious about?"
-      : "Have you built anything with AI yet?";
+    return pickQuestion(seed, purpose === "opener"
+      ? [
+        "Which AI topic are you most curious about?",
+        "Are you building anything with AI right now?",
+        "What AI demo caught your attention lately?"
+      ]
+      : [
+        "Have you built anything with AI yet?",
+        "What would you like AI to help you make?",
+        "Which AI tool have you actually found useful?"
+      ]);
   }
 
   if (matchesAny(text, ["workshop", "hands-on", "demo"])) {
-    return purpose === "opener"
-      ? "Are you planning to try the hands-on part?"
-      : "What are you hoping to learn today?";
+    return pickQuestion(seed, purpose === "opener"
+      ? [
+        "Are you planning to try the hands-on part?",
+        "Which part of the workshop are you here for?",
+        "Have you done a session like this before?"
+      ]
+      : [
+        "What are you hoping to learn today?",
+        "What would make this workshop useful for you?",
+        "Is there anything you want to try building?"
+      ]);
   }
 
   return "";
+}
+
+function pickQuestion(seed, questions) {
+  return questions[Math.abs(hashText(seed)) % questions.length];
+}
+
+function hashText(text) {
+  return [...text].reduce((hash, char) => ((hash << 5) - hash + char.charCodeAt(0)) | 0, 0);
 }
 
 function isGenericOpener(question) {
