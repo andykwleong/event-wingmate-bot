@@ -28,6 +28,8 @@ The bot accepts a Luma link or event text, extracts event details, checks Google
 
 Do not commit real values.
 
+Supabase tables in the public schema must have Row Level Security enabled, with no public `anon` or `authenticated` policies. Railway uses the backend Supabase secret/service-role key.
+
 - `TELEGRAM_BOT_TOKEN`
 - `HOME_ADDRESS`
 - `DEFAULT_TIMEZONE`

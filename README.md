@@ -141,7 +141,15 @@ create table if not exists events (
 create index if not exists events_starts_at_idx on events (starts_at);
 create index if not exists events_delete_after_idx on events (delete_after);
 create index if not exists events_telegram_user_id_idx on events (telegram_user_id);
+
+alter table public.bot_owners enable row level security;
+alter table public.events enable row level security;
+
+revoke all on public.bot_owners from anon, authenticated;
+revoke all on public.events from anon, authenticated;
 ```
+
+RLS should stay enabled because these tables live in Supabase's public schema. This bot is backend-only and uses a Supabase secret/service-role key from Railway, so it does not need public `anon` or `authenticated` table policies.
 
 Use a Supabase secret/service-role key only in a backend environment such as Railway. Do not expose it in client-side code.
 
