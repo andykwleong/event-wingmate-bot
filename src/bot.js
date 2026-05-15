@@ -19,6 +19,7 @@ const config = {
   googleClientId: env.GOOGLE_CLIENT_ID || "",
   googleClientSecret: env.GOOGLE_CLIENT_SECRET || "",
   googleRedirectUri: env.GOOGLE_REDIRECT_URI || "",
+  routeCacheHours: Number(env.ROUTE_CACHE_HOURS || 12),
   port: Number(env.PORT || 3000)
 };
 
@@ -324,14 +325,19 @@ function parseEvent(text, chatId, userId) {
 }
 
 async function enrichEventWithTravel(event) {
-  if (!config.googleMapsApiKey) return;
-  if (!shouldRouteToEventLocation(event)) return;
+  if (!config.googleMapsApiKey) return false;
+  if (!shouldRouteToEventLocation(event)) return false;
+  if (!shouldAttemptTravelLookup(event)) return false;
+
+  event.travel = {
+    ...(event.travel || {}),
+    attemptedAt: new Date().toISOString()
+  };
 
   const departureTime = recommendedDepartureDate(event.startsAt);
-  const travel = {};
 
   try {
-    travel.transit = await computeRoute({
+    event.travel.transit = await computeRoute({
       origin: config.homeAddress,
       destination: event.location,
       mode: "TRANSIT",
@@ -342,7 +348,7 @@ async function enrichEventWithTravel(event) {
   }
 
   try {
-    travel.driving = await computeRoute({
+    event.travel.driving = await computeRoute({
       origin: config.homeAddress,
       destination: event.location,
       mode: "DRIVE",
@@ -352,7 +358,17 @@ async function enrichEventWithTravel(event) {
     console.error("Driving route failed:", error.message);
   }
 
-  if (travel.transit || travel.driving) event.travel = travel;
+  return true;
+}
+
+function shouldAttemptTravelLookup(event) {
+  if (hasTravelDetails(event)) return false;
+
+  const attemptedAt = event.travel?.attemptedAt ? new Date(event.travel.attemptedAt).getTime() : 0;
+  if (!attemptedAt) return true;
+
+  const retryAfter = config.routeCacheHours * 60 * 60 * 1000;
+  return Date.now() - attemptedAt > retryAfter;
 }
 
 function recommendedDepartureDate(startsAt) {
@@ -373,7 +389,6 @@ async function computeRoute({ origin, destination, mode, departureTime }) {
       origin: { address: origin },
       destination: { address: destination },
       travelMode: mode,
-      routingPreference: mode === "DRIVE" ? "TRAFFIC_AWARE" : undefined,
       departureTime: departureTime.toISOString(),
       computeAlternativeRoutes: false,
       languageCode: "en",
@@ -1735,8 +1750,7 @@ async function sendDueReminders() {
   for (const event of events) {
     const startsAt = new Date(event.startsAt).getTime();
     if (!hasTravelDetails(event) && shouldRouteToEventLocation(event)) {
-      await enrichEventWithTravel(event);
-      changed = true;
+      if (await enrichEventWithTravel(event)) changed = true;
     }
 
     const dueReminders = [
@@ -2012,7 +2026,8 @@ async function updateEvents(events) {
       await supabaseRequest(`/rest/v1/events?id=eq.${encodeURIComponent(event.id)}`, {
         method: "PATCH",
         body: {
-          reminders: event.reminders
+          reminders: event.reminders,
+          travel: event.travel || {}
         }
       });
     }

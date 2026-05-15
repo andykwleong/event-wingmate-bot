@@ -39,6 +39,7 @@ Supabase tables in the public schema must have Row Level Security enabled, with 
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `GOOGLE_MAPS_API_KEY`
+- `ROUTE_CACHE_HOURS`
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
 - `GOOGLE_REDIRECT_URI`
@@ -48,6 +49,12 @@ Supabase tables in the public schema must have Row Level Security enabled, with 
 ```text
 https://event-wingmate-bot-production.up.railway.app/auth/google/callback
 ```
+
+Google Maps billing safety:
+
+- Travel lookup results must be persisted to Supabase.
+- Failed travel lookups must set `travel.attemptedAt` and respect `ROUTE_CACHE_HOURS`.
+- Do not use traffic-aware driving routing unless the user explicitly accepts the higher billing risk.
 
 ## Telegram Commands
 

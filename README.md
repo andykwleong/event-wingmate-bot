@@ -69,6 +69,7 @@ SUPABASE_SERVICE_ROLE_KEY=
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5.4-mini
 GOOGLE_MAPS_API_KEY=
+ROUTE_CACHE_HOURS=12
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GOOGLE_REDIRECT_URI=
@@ -211,6 +212,15 @@ It should return:
 - Future-event prep ideas prefer event-specific questions over generic openers, and wording varies within event categories.
 - The 24-hour reminder uses the full prep format: venue, summary, transit, car, map link, three openers, and tiny mission.
 - Use `/event_details 1` to manually generate full prep and travel for any saved event.
+- Travel details are saved after lookup so reminders and duplicate pastes reuse stored results instead of repeatedly calling Google Routes.
+- Failed travel lookups are retried only after `ROUTE_CACHE_HOURS`, which defaults to 12 hours.
+
+## Google Maps Billing Safety
+
+- Set a hard Google Cloud quota or budget before enabling `GOOGLE_MAPS_API_KEY`.
+- Keep `GOOGLE_MAPS_API_KEY` unset if you only want free Google Maps direction links without route duration estimates.
+- The bot avoids traffic-aware driving routes to reduce the chance of triggering more expensive Routes API SKUs.
+- The bot caches travel results per saved event and records failed lookup attempts to avoid background retry loops.
 
 ## Duplicate And Deletion Behavior
 
