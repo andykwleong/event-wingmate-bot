@@ -39,7 +39,6 @@ Supabase tables in the public schema must have Row Level Security enabled, with 
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `GOOGLE_MAPS_API_KEY`
-- `ROUTE_CACHE_HOURS`
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
 - `GOOGLE_REDIRECT_URI`
@@ -52,8 +51,9 @@ https://event-wingmate-bot-production.up.railway.app/auth/google/callback
 
 Google Maps billing safety:
 
-- Travel lookup results must be persisted to Supabase.
-- Failed travel lookups must set `travel.attemptedAt` and respect `ROUTE_CACHE_HOURS`.
+- Google Maps route output must not be persisted to Supabase.
+- The background reminder loop must not call Google Maps Routes API.
+- If older versions stored route output, clear `public.events.travel` with `update public.events set travel = '{}'::jsonb;`.
 - Do not use traffic-aware driving routing unless the user explicitly accepts the higher billing risk.
 
 ## Telegram Commands

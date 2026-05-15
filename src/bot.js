@@ -19,7 +19,6 @@ const config = {
   googleClientId: env.GOOGLE_CLIENT_ID || "",
   googleClientSecret: env.GOOGLE_CLIENT_SECRET || "",
   googleRedirectUri: env.GOOGLE_REDIRECT_URI || "",
-  routeCacheHours: Number(env.ROUTE_CACHE_HOURS || 12),
   port: Number(env.PORT || 3000)
 };
 
@@ -327,12 +326,7 @@ function parseEvent(text, chatId, userId) {
 async function enrichEventWithTravel(event) {
   if (!config.googleMapsApiKey) return false;
   if (!shouldRouteToEventLocation(event)) return false;
-  if (!shouldAttemptTravelLookup(event)) return false;
-
-  event.travel = {
-    ...(event.travel || {}),
-    attemptedAt: new Date().toISOString()
-  };
+  event.travel = {};
 
   const departureTime = recommendedDepartureDate(event.startsAt);
 
@@ -359,16 +353,6 @@ async function enrichEventWithTravel(event) {
   }
 
   return true;
-}
-
-function shouldAttemptTravelLookup(event) {
-  if (hasTravelDetails(event)) return false;
-
-  const attemptedAt = event.travel?.attemptedAt ? new Date(event.travel.attemptedAt).getTime() : 0;
-  if (!attemptedAt) return true;
-
-  const retryAfter = config.routeCacheHours * 60 * 60 * 1000;
-  return Date.now() - attemptedAt > retryAfter;
 }
 
 function recommendedDepartureDate(startsAt) {
@@ -1306,7 +1290,7 @@ function mergeDuplicateEvent(savedEvent, freshEvent) {
     rawText: savedEvent.rawText || freshEvent.rawText,
     sourceText: freshEvent.sourceText || savedEvent.sourceText,
     prep: hasUsefulPrep(freshEvent.prep) ? freshEvent.prep : savedEvent.prep,
-    travel: hasTravelDetails(freshEvent) ? freshEvent.travel : savedEvent.travel,
+    travel: null,
     deleteAfter: freshEvent.deleteAfter || savedEvent.deleteAfter,
     reminders: savedEvent.reminders || freshEvent.reminders,
     createdAt: savedEvent.createdAt || freshEvent.createdAt
@@ -1681,7 +1665,6 @@ async function eventDetailsMessage(chatId, text) {
   const event = events[number - 1];
   if (!hasTravelDetails(event) && shouldRouteToEventLocation(event)) {
     await enrichEventWithTravel(event);
-    await updateEvent(event);
   }
 
   return eventPrepMessage(event);
@@ -1749,10 +1732,6 @@ async function sendDueReminders() {
 
   for (const event of events) {
     const startsAt = new Date(event.startsAt).getTime();
-    if (!hasTravelDetails(event) && shouldRouteToEventLocation(event)) {
-      if (await enrichEventWithTravel(event)) changed = true;
-    }
-
     const dueReminders = [
       {
         key: "dayBefore",
@@ -2026,8 +2005,7 @@ async function updateEvents(events) {
       await supabaseRequest(`/rest/v1/events?id=eq.${encodeURIComponent(event.id)}`, {
         method: "PATCH",
         body: {
-          reminders: event.reminders,
-          travel: event.travel || {}
+          reminders: event.reminders
         }
       });
     }
@@ -2153,7 +2131,7 @@ function toSupabaseEvent(event) {
     audience: event.audience || null,
     networking_at: event.networkingAt || null,
     prep: event.prep || {},
-    travel: event.travel || {},
+    travel: {},
     reminders: event.reminders,
     created_at: event.createdAt,
     delete_after: event.deleteAfter
@@ -2176,7 +2154,7 @@ function fromSupabaseEvent(row) {
     audience: row.audience || "",
     networkingAt: row.networking_at || null,
     prep: row.prep || null,
-    travel: row.travel || null,
+    travel: null,
     reminders: row.reminders || {},
     createdAt: row.created_at,
     deleteAfter: row.delete_after
