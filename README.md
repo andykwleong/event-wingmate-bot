@@ -209,17 +209,19 @@ It should return:
 - If an event starts within 24 hours, the bot immediately returns full prep, travel, openers, and a tiny mission.
 - If an event is more than 24 hours away, the bot sends a lighter saved confirmation with three prep ideas.
 - Future-event prep ideas prefer event-specific questions over generic openers, and wording varies within event categories.
-- The 24-hour reminder uses the full prep format: venue, summary, transit, car, map link, three openers, and tiny mission.
+- The 24-hour reminder uses the full prep format: venue, Luma link, summary, transit, car, map link, three openers, and tiny mission.
+- The 1-hour leave reminder uses Google Maps links without a fixed origin, so Maps opens from the user's current location.
+- The networking reminder sends 30 minutes before an extracted networking time, or 30 minutes after event start when no networking time is known.
 - Use `/event_details 1` to manually generate full prep and travel for any saved event.
-- Google Maps route details are used only for the immediate reply and are not stored in Supabase.
-- Scheduled reminders do not call Google Maps Routes API. If no immediate route estimate is available, reminders show a Google Maps link only.
+- Google Maps route details are used only for the immediate outgoing message and are not stored in Supabase.
+- The 24-hour reminder may calculate one public transport route and one driving route when `GOOGLE_MAPS_API_KEY` is enabled; the result is sent immediately and not persisted.
 
 ## Google Maps Billing Safety
 
 - Set a hard Google Cloud quota or budget before enabling `GOOGLE_MAPS_API_KEY`.
 - Keep `GOOGLE_MAPS_API_KEY` unset if you only want free Google Maps direction links without route duration estimates.
 - The bot avoids traffic-aware driving routes to reduce the chance of triggering more expensive Routes API SKUs.
-- The background reminder loop must not call Google Maps Routes API.
+- Do not call Google Maps Routes API during general background polling; call it only while constructing a due, outgoing message.
 - Do not store Google Maps route duration, distance, step summaries, or other route output in Supabase.
 
 If an older version of the bot stored route output, clear it from Supabase:
@@ -236,7 +238,7 @@ set travel = '{}'::jsonb;
 - If you paste the same event again and the fresh lookup finds better details, such as a Google Calendar location or travel time, the saved event is updated.
 - `/delete_event 1` deletes all saved copies with the same fingerprint, so old test duplicates do not keep triggering reminders.
 - `/delete_all_events confirm` deletes every saved event for the current Telegram chat.
-- Expired events are automatically removed about two days after the event starts.
+- Expired events are automatically removed about 24 hours after the event starts.
 
 ## Privacy And Security
 

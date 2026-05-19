@@ -953,7 +953,7 @@ async function extractEventWithOpenAI(rawText) {
 
 function deleteAfterFor(startsAt) {
   const date = new Date(startsAt);
-  date.setDate(date.getDate() + 2);
+  date.setDate(date.getDate() + 1);
   return date.toISOString();
 }
 
@@ -1349,8 +1349,8 @@ function travelLines(event, transitUrl, drivingUrl) {
 
   if (!hasTravelDetails(event)) {
     return [
-      `Public transport: ${escapeHtml(transitUrl)}`,
-      `Car: ${escapeHtml(drivingUrl)}`
+      `Public transport: <a href="${escapeHtmlAttribute(transitUrl)}">Here</a>`,
+      `Car: <a href="${escapeHtmlAttribute(drivingUrl)}">Here</a>`
     ];
   }
 
@@ -1489,11 +1489,15 @@ function talkingPointsFor(eventType) {
 function mapsUrl(origin, destination, mode) {
   const params = new URLSearchParams({
     api: "1",
-    origin,
     destination,
     travelmode: mode
   });
+  if (origin) params.set("origin", origin);
   return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
+
+function currentLocationMapsUrl(destination, mode) {
+  return mapsUrl("", destination, mode);
 }
 
 function welcomeMessage() {
@@ -1732,11 +1736,18 @@ async function sendDueReminders() {
 
   for (const event of events) {
     const startsAt = new Date(event.startsAt).getTime();
+    const networkingDueAt = event.networkingAt
+      ? new Date(event.networkingAt).getTime() - 30 * 60 * 1000
+      : startsAt + 30 * 60 * 1000;
     const dueReminders = [
       {
         key: "dayBefore",
         dueAt: startsAt - 24 * 60 * 60 * 1000,
-        message: dayBeforeMessage(event),
+        expiresAt: startsAt,
+        buildMessage: async () => {
+          await enrichEventWithTravel(event);
+          return dayBeforeMessage(event);
+        },
         options: {
           disable_web_page_preview: true,
           parse_mode: "HTML"
@@ -1745,21 +1756,32 @@ async function sendDueReminders() {
       {
         key: "leaveTime",
         dueAt: startsAt - 60 * 60 * 1000,
-        message: leaveTimeMessage(event)
+        expiresAt: startsAt,
+        buildMessage: async () => leaveTimeMessage(event),
+        options: {
+          disable_web_page_preview: true,
+          parse_mode: "HTML"
+        }
       },
       {
         key: "networking",
-        dueAt: event.networkingAt ? new Date(event.networkingAt).getTime() : startsAt + 30 * 60 * 1000,
-        message: networkingMessage(event)
+        dueAt: networkingDueAt,
+        expiresAt: Math.max(networkingDueAt + 2 * 60 * 60 * 1000, startsAt + 3 * 60 * 60 * 1000),
+        buildMessage: async () => networkingMessage(event),
+        options: {
+          disable_web_page_preview: true,
+          parse_mode: "HTML"
+        }
       }
     ];
 
     for (const reminder of dueReminders) {
       const reminderKey = `${event.id}:${reminder.key}`;
       const alreadySent = event.reminders?.[reminder.key] || sentReminderKeys.has(reminderKey);
-      const isDue = now >= reminder.dueAt && now < reminder.dueAt + 10 * 60 * 1000;
+      const isDue = now >= reminder.dueAt && now < reminder.expiresAt;
       if (!alreadySent && isDue) {
-        await sendMessage(event.chatId, reminder.message, reminder.options || { disable_web_page_preview: true });
+        const message = await reminder.buildMessage();
+        await sendMessage(event.chatId, message, reminder.options || { disable_web_page_preview: true });
         event.reminders = { ...event.reminders, [reminder.key]: true };
         sentReminderKeys.add(reminderKey);
         changed = true;
@@ -1783,6 +1805,7 @@ function dayBeforeMessage(event) {
     "",
     event.summary ? "Event Summary:" : "",
     event.summary ? escapeHtml(event.summary) : "",
+    event.url ? `Link: ${escapeHtml(event.url)}` : "",
     "",
     "Getting there:",
     ...travelLines(event, transitUrl, drivingUrl),
@@ -1796,31 +1819,54 @@ function dayBeforeMessage(event) {
 }
 
 function leaveTimeMessage(event) {
-  const transitDuration = event.travel?.transit?.durationSeconds;
   if (!shouldRouteToEventLocation(event)) {
     return [
-      `Venue still missing for ${event.title}.`,
+      `Venue still missing for ${escapeHtml(formatTitle(event.title))}.`,
       "",
       "I cannot calculate travel time yet. Check the event page or calendar invite for the final location before leaving."
     ].join("\n");
   }
 
+  const transitUrl = currentLocationMapsUrl(event.location, "transit");
+  const drivingUrl = currentLocationMapsUrl(event.location, "driving");
+
   return [
-    `Leave soon for ${event.title}.`,
+    `Leave soon for ${escapeHtml(formatTitle(event.title))}.`,
     "",
-    transitDuration ? `Public transport should take about ${formatDuration(transitDuration)}. Give yourself breathing room and arrive as the person who planned this nicely.` : "Check the route now, give yourself breathing room, and arrive as the person who planned this nicely.",
-    mapsUrl(config.homeAddress, event.location, "transit")
+    "Open from your current location:",
+    `Public transport: <a href="${escapeHtmlAttribute(transitUrl)}">Here</a>`,
+    `Car: <a href="${escapeHtmlAttribute(drivingUrl)}">Here</a>`,
+    "",
+    "Give yourself breathing room and arrive as the person who planned this nicely."
   ].join("\n");
 }
 
 function networkingMessage(event) {
-  const encouragement = event.prep?.encouragement || "You are already there. The hard part is done.";
-  const mission = event.prep?.socialMission || "Say hi to one person, ask what brought them here, and stay for one honest answer.";
-  return [
+  const conversationStarters = event.prep?.conversationStarters || [];
+  const encouragement = randomEncouragement();
+
+  return compactMessage([
     "Networking time.",
     "",
-    `${encouragement} ${mission}`
-  ].join("\n");
+    escapeHtml(encouragement),
+    "",
+    conversationStarters.length ? "Easy openers:" : "",
+    ...formatOpeners(conversationStarters),
+    conversationStarters.length ? "" : "",
+    "Tiny mission:",
+    escapeHtml(missionQuestion(event))
+  ]);
+}
+
+function randomEncouragement() {
+  const messages = [
+    "You made it here. Future you gets more from one small hello than from hiding by your phone.",
+    "Tiny brave move time. One question, one person, then you can breathe.",
+    "You do not need to become a networking person. Just be curious once.",
+    "The room already did the hard part by gathering people with the same interest. Use that.",
+    "No performance needed. Ask one real question and let that count."
+  ];
+  return messages[Math.floor(Math.random() * messages.length)];
 }
 
 async function telegram(method, payload) {
@@ -1989,7 +2035,7 @@ async function readUpcomingEvents() {
   if (useSupabase) {
     const query = new URLSearchParams({
       select: "*",
-      starts_at: `gte.${new Date(Date.now() - 60 * 60 * 1000).toISOString()}`,
+      starts_at: `gte.${new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()}`,
       order: "starts_at.asc"
     });
     const rows = await supabaseRequest(`/rest/v1/events?${query.toString()}`);
@@ -2080,7 +2126,11 @@ async function deleteEventsForChat(chatId) {
 
 async function deleteExpiredEvents() {
   if (useSupabase) {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     await supabaseRequest(`/rest/v1/events?delete_after=lt.${encodeURIComponent(new Date().toISOString())}`, {
+      method: "DELETE"
+    });
+    await supabaseRequest(`/rest/v1/events?starts_at=lt.${encodeURIComponent(cutoff)}`, {
       method: "DELETE"
     });
     return;
@@ -2088,7 +2138,7 @@ async function deleteExpiredEvents() {
 
   const events = await readEvents();
   const activeEvents = events.filter((event) => {
-    const deleteAfter = event.deleteAfter || deleteAfterFor(event.startsAt);
+    const deleteAfter = deleteAfterFor(event.startsAt);
     return new Date(deleteAfter).getTime() > Date.now();
   });
   if (activeEvents.length !== events.length) await writeEvents(activeEvents);
