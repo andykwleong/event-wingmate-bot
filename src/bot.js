@@ -465,7 +465,6 @@ async function fetchEventPageText(url) {
     ...extractLumaNextDataDetails(html),
     locationHidden ? "" : extractVisibleLumaLocation(html),
     locationHidden ? "Luma location status: exact location hidden until registration or calendar update" : "",
-    ...(locationHidden ? [] : extractGoogleMapsDestinations(html)),
     ...extractJsonLdSummaries(html)
   ];
 
@@ -519,14 +518,6 @@ function extractExactLumaLocation(event, addressInfo) {
   return uniqueNonEmpty(candidates).find(hasSpecificLocation) || "";
 }
 
-function extractGoogleMapsDestinations(html) {
-  return [...html.matchAll(/https?:\/\/[^"'<>\\\s]*google[^"'<>\\\s]*/gi)]
-    .map((match) => decodeHtml(match[0]))
-    .map((url) => extractGoogleMapsDestination(url))
-    .filter(Boolean)
-    .map((destination) => `Google Maps destination: ${destination}`);
-}
-
 function extractVisibleLumaLocation(html) {
   const text = decodeCalendarText(html);
   const locationIndex = text.toLowerCase().indexOf("location");
@@ -553,17 +544,6 @@ function cleanVisibleLocationLine(value) {
     .replace(/\bMap data\b.*$/i, "")
     .replace(/\bTerms\b.*$/i, "")
     .trim();
-}
-
-function extractGoogleMapsDestination(url) {
-  try {
-    const parsed = new URL(url);
-    const query = parsed.searchParams.get("query");
-    const center = parsed.searchParams.get("center");
-    return query || center || "";
-  } catch {
-    return "";
-  }
 }
 
 function extractHtmlTitle(html) {
@@ -615,13 +595,7 @@ function jsonLdSummary(item) {
     item.location?.name,
     item.location?.address?.streetAddress,
     item.location?.address?.addressLocality,
-    item.location?.address?.addressCountry,
-    item.location?.geo?.latitude && item.location?.geo?.longitude
-      ? `Coordinates: ${item.location.geo.latitude},${item.location.geo.longitude}`
-      : "",
-    item.location?.latitude && item.location?.longitude
-      ? `Coordinates: ${item.location.latitude},${item.location.longitude}`
-      : ""
+    item.location?.address?.addressCountry
   ];
   return uniqueNonEmpty(fields).join("\n");
 }
@@ -649,7 +623,7 @@ async function enrichEventWithOpenAI(event) {
     const extracted = await extractEventWithOpenAI(event.sourceText || event.rawText);
     if (extracted.title) event.title = extracted.title.slice(0, 120);
     if (extracted.url) event.url = extracted.url;
-    if (hasSpecificLocation(extracted.location)) {
+    if (hasSpecificLocation(extracted.location) && !isCoordinateLocation(extracted.location)) {
       event.location = extracted.location;
     } else if (!hasSpecificLocation(event.location)) {
       event.location = "Venue to confirm";
@@ -716,7 +690,7 @@ function bestCalendarLocation(calendarEvent) {
     extractCalendarDescriptionLocation(calendarEvent.description)
   ]).filter(hasSpecificLocation);
 
-  return candidates.find((candidate) => !isCoordinateLocation(candidate)) || candidates[0] || "";
+  return candidates.find((candidate) => !isCoordinateLocation(candidate)) || "";
 }
 
 function extractCalendarDescriptionLocation(description = "") {
@@ -985,8 +959,8 @@ async function extractEventWithOpenAI(rawText) {
             "For location, only return a specific venue name, building, street address, or clearly routable place. Do not return only a city, country, region, or vague value like Singapore, Online, TBA, TBD, or venue to be announced.",
             "Do not infer the venue from prose like 'landing at AI Engineer Singapore' unless the text explicitly labels it as a venue/location/address or structured event metadata gives a specific Place/address.",
             "If fetched details include a visible Luma location or exact Luma location, prefer that readable venue/address over raw coordinates.",
-            "Use Google Maps destination or Coordinates only when no readable venue/address is available.",
-            "If the event only exposes a city-level location and no readable venue/address, coordinates, or maps destination, put venue/address in missingInfo and return an empty location.",
+            "Never return raw latitude/longitude coordinates as the location.",
+            "If the event only exposes a city-level location or raw coordinates with no readable venue/address, put venue/address in missingInfo and return an empty location.",
             "For dates, return ISO 8601 strings with timezone offset when the event text provides enough information. If date or time is missing, return an empty string.",
             "Write for an introvert who wants one natural, low-pressure conversation, not generic networking.",
             "Conversation starters must sound like something a person would casually say out loud. Keep each under 16 words.",
@@ -1055,7 +1029,7 @@ function extractLocation(lines, text) {
 function shouldRouteToEventLocation(event) {
   if (event.locationSource === "google_calendar") return hasSpecificLocation(event.location);
   if (isLocationHiddenFromBot(event.sourceText)) return false;
-  return hasSpecificLocation(event.location) && (!hasMissingLocationInfo(event.prep?.missingInfo) || isCoordinateLocation(event.location));
+  return hasSpecificLocation(event.location) && !isCoordinateLocation(event.location) && !hasMissingLocationInfo(event.prep?.missingInfo);
 }
 
 function isLocationHiddenFromBot(sourceText = "") {
@@ -1086,7 +1060,7 @@ function hasSpecificLocation(location) {
   ]);
 
   if (vagueLocations.has(normalized)) return false;
-  if (isCoordinateLocation(location)) return true;
+  if (isCoordinateLocation(location)) return false;
   if (/^(singapore|sg)[\s,.]*$/i.test(location)) return false;
   if (/\b(tba|tbd|to be announced|to be confirmed)\b/i.test(location)) return false;
   if (/\b(we'?re|we are|throwing|landing at|bring your|free boba|free coffee|sync-up|meetup|event)\b/i.test(location)) return false;
@@ -1819,6 +1793,7 @@ async function sendDueReminders() {
         dueAt: startsAt - 24 * 60 * 60 * 1000,
         expiresAt: startsAt,
         buildMessage: async () => {
+          await enrichEventWithCalendar(event);
           await enrichEventWithTravel(event);
           return dayBeforeMessage(event);
         },

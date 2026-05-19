@@ -82,6 +82,7 @@ Google Maps billing safety:
 - If Luma exposes both readable location text and map coordinates, prefer the readable venue/address.
 - If Google Calendar has the location, that location overrides the hidden Luma status.
 - Google Calendar readable venue/address text should be preferred over raw coordinate locations.
+- Never show raw coordinates as a location. If only coordinates are available, say `Location has yet to be updated`.
 - If no exact location is available, the bot says: `Location has yet to be updated`.
 - Google Maps routing only runs when a specific location is available and only while constructing an immediate outgoing message.
 - Duplicate Luma links are deduped by Luma slug.
