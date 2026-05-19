@@ -79,6 +79,7 @@ Google Maps billing safety:
 - Future-event prep suggestions should prefer event-specific questions over generic openers like "What brought you here?" and should vary wording within event categories.
 - `/event_details [number]` can manually generate full prep and travel for any saved event.
 - If Luma hides the exact location, the bot checks Google Calendar for a matching accepted event.
+- If Luma exposes both readable location text and map coordinates, prefer the readable venue/address.
 - If Google Calendar has the location, that location overrides the hidden Luma status.
 - Google Calendar readable venue/address text should be preferred over raw coordinate locations.
 - If no exact location is available, the bot says: `Location has yet to be updated`.

@@ -463,6 +463,7 @@ async function fetchEventPageText(url) {
     extractMetaContent(html, "og:description"),
     extractMetaContent(html, "og:site_name"),
     ...extractLumaNextDataDetails(html),
+    locationHidden ? "" : extractVisibleLumaLocation(html),
     locationHidden ? "Luma location status: exact location hidden until registration or calendar update" : "",
     ...(locationHidden ? [] : extractGoogleMapsDestinations(html)),
     ...extractJsonLdSummaries(html)
@@ -524,6 +525,34 @@ function extractGoogleMapsDestinations(html) {
     .map((url) => extractGoogleMapsDestination(url))
     .filter(Boolean)
     .map((destination) => `Google Maps destination: ${destination}`);
+}
+
+function extractVisibleLumaLocation(html) {
+  const text = decodeCalendarText(html);
+  const locationIndex = text.toLowerCase().indexOf("location");
+  if (locationIndex === -1) return "";
+
+  const locationText = text.slice(locationIndex).split("\n").slice(0, 8);
+  const candidates = [];
+  for (let index = 1; index < locationText.length; index += 1) {
+    const line = cleanVisibleLocationLine(locationText[index]);
+    if (line && hasSpecificLocation(line) && !isCoordinateLocation(line)) candidates.push(line);
+    const nextLine = cleanVisibleLocationLine(locationText[index + 1]);
+    const combined = nextLine ? `${line}, ${nextLine}` : "";
+    if (combined && hasSpecificLocation(combined) && !isCoordinateLocation(combined)) candidates.push(combined);
+  }
+
+  const location = candidates.find((candidate) => /\d/.test(candidate)) || candidates[0] || "";
+  return location ? `Visible Luma location: ${location}` : "";
+}
+
+function cleanVisibleLocationLine(value) {
+  return String(value || "")
+    .replace(/\bMaps?\b.*$/i, "")
+    .replace(/\bKeyboard shortcuts\b.*$/i, "")
+    .replace(/\bMap data\b.*$/i, "")
+    .replace(/\bTerms\b.*$/i, "")
+    .trim();
 }
 
 function extractGoogleMapsDestination(url) {
@@ -955,8 +984,9 @@ async function extractEventWithOpenAI(rawText) {
             "Return empty strings for unknown text fields and empty arrays for unknown lists.",
             "For location, only return a specific venue name, building, street address, or clearly routable place. Do not return only a city, country, region, or vague value like Singapore, Online, TBA, TBD, or venue to be announced.",
             "Do not infer the venue from prose like 'landing at AI Engineer Singapore' unless the text explicitly labels it as a venue/location/address or structured event metadata gives a specific Place/address.",
-            "If fetched details include 'Google Maps destination:' or 'Coordinates:', use that exact coordinate pair as the location.",
-            "If the event only exposes a city-level location and no coordinates or maps destination, put venue/address in missingInfo and return an empty location.",
+            "If fetched details include a visible Luma location or exact Luma location, prefer that readable venue/address over raw coordinates.",
+            "Use Google Maps destination or Coordinates only when no readable venue/address is available.",
+            "If the event only exposes a city-level location and no readable venue/address, coordinates, or maps destination, put venue/address in missingInfo and return an empty location.",
             "For dates, return ISO 8601 strings with timezone offset when the event text provides enough information. If date or time is missing, return an empty string.",
             "Write for an introvert who wants one natural, low-pressure conversation, not generic networking.",
             "Conversation starters must sound like something a person would casually say out loud. Keep each under 16 words.",
