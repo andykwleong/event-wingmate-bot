@@ -665,7 +665,7 @@ async function enrichEventWithCalendar(event) {
 
     const accessToken = await refreshGoogleAccessToken(connection.google_refresh_token);
     const calendarEvent = await findMatchingCalendarEvent(accessToken, event);
-    const location = calendarEvent?.location?.trim();
+    const location = bestCalendarLocation(calendarEvent);
     if (hasSpecificLocation(location)) {
       event.location = location;
       event.locationSource = "google_calendar";
@@ -677,6 +677,50 @@ async function enrichEventWithCalendar(event) {
   } catch (error) {
     console.error("Google Calendar lookup failed:", error.message);
   }
+}
+
+function bestCalendarLocation(calendarEvent) {
+  if (!calendarEvent) return "";
+
+  const candidates = uniqueNonEmpty([
+    calendarEvent.location,
+    extractCalendarDescriptionLocation(calendarEvent.description)
+  ]).filter(hasSpecificLocation);
+
+  return candidates.find((candidate) => !isCoordinateLocation(candidate)) || candidates[0] || "";
+}
+
+function extractCalendarDescriptionLocation(description = "") {
+  const text = decodeCalendarText(description);
+  const labelled = text.match(/\b(?:location|venue|where|address)\s*:\s*([^\n]+)/i)?.[1];
+  if (labelled && hasSpecificLocation(cleanCalendarLocation(labelled))) {
+    return cleanCalendarLocation(labelled);
+  }
+
+  return "";
+}
+
+function decodeCalendarText(value) {
+  return String(value || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(?:p|div|li|tr|h[1-6])>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function cleanCalendarLocation(value) {
+  return String(value || "")
+    .replace(/\s+(?:https?:\/\/|www\.).*$/i, "")
+    .replace(/\s+\b(?:details|description|organizer|host|when|date|time)\s*:.*$/i, "")
+    .trim();
 }
 
 async function exchangeGoogleCode(code) {

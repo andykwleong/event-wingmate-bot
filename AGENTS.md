@@ -80,6 +80,7 @@ Google Maps billing safety:
 - `/event_details [number]` can manually generate full prep and travel for any saved event.
 - If Luma hides the exact location, the bot checks Google Calendar for a matching accepted event.
 - If Google Calendar has the location, that location overrides the hidden Luma status.
+- Google Calendar readable venue/address text should be preferred over raw coordinate locations.
 - If no exact location is available, the bot says: `Location has yet to be updated`.
 - Google Maps routing only runs when a specific location is available and only while constructing an immediate outgoing message.
 - Duplicate Luma links are deduped by Luma slug.
