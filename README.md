@@ -9,6 +9,7 @@ Paste a Luma link or event text, and the bot can save the event, extract the det
 - Save events from Luma links or plain event text
 - Extract event name, date/time, location, summary, and prep prompts with OpenAI
 - Look up exact event locations from Google Calendar when Luma hides guest-only addresses
+- Prefer readable venue names and addresses; raw coordinates are never shown as event locations
 - Calculate public transport and driving time with Google Maps Routes API
 - Send full prep 24 hours before the event, a leave-time reminder, and a networking nudge
 - Generate event-specific prep questions and vary wording so prompts do not feel repeated
@@ -213,6 +214,7 @@ It should return:
 - The 1-hour leave reminder uses Google Maps links without a fixed origin, so Maps opens from the user's current location.
 - The networking reminder sends 30 minutes before an extracted networking time, or 30 minutes after event start when no networking time is known.
 - Use `/event_details 1` to manually generate full prep and travel for any saved event.
+- If Luma or Google Calendar only exposes raw coordinates, the bot treats the location as unavailable and says `Location has yet to be updated`.
 - Google Maps route details are used only for the immediate outgoing message and are not stored in Supabase.
 - The 24-hour reminder may calculate one public transport route and one driving route when `GOOGLE_MAPS_API_KEY` is enabled; the result is sent immediately and not persisted.
 
@@ -220,7 +222,7 @@ It should return:
 
 - Set a hard Google Cloud quota or budget before enabling `GOOGLE_MAPS_API_KEY`.
 - Keep `GOOGLE_MAPS_API_KEY` unset if you only want free Google Maps direction links without route duration estimates.
-- The bot avoids traffic-aware driving routes to reduce the chance of triggering more expensive Routes API SKUs.
+- The bot uses basic non-traffic-aware driving routes to reduce the chance of triggering more expensive Routes API SKUs.
 - Do not call Google Maps Routes API during general background polling; call it only while constructing a due, outgoing message.
 - Do not store Google Maps route duration, distance, step summaries, or other route output in Supabase.
 

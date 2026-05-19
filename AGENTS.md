@@ -85,6 +85,7 @@ Google Maps billing safety:
 - Never show raw coordinates as a location. If only coordinates are available, say `Location has yet to be updated`.
 - If no exact location is available, the bot says: `Location has yet to be updated`.
 - Google Maps routing only runs when a specific location is available and only while constructing an immediate outgoing message.
+- Driving routes should use basic non-traffic-aware routing unless the user explicitly accepts higher billing risk.
 - Duplicate Luma links are deduped by Luma slug.
 - When a duplicate event is pasted, fresh extraction/calendar/travel data should update the saved event if it fills missing details.
 - Plain text events are deduped by normalized title and start time.
