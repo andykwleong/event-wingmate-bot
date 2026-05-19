@@ -46,7 +46,7 @@ Supabase tables in the public schema must have Row Level Security enabled, with 
 `GOOGLE_REDIRECT_URI` should look like:
 
 ```text
-https://event-wingmate-bot-production.up.railway.app/auth/google/callback
+https://your-railway-domain/auth/google/callback
 ```
 
 Google Maps billing safety:
