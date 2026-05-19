@@ -362,18 +362,24 @@ function recommendedDepartureDate(startsAt) {
 }
 
 async function computeRoute({ origin, destination, mode, departureTime }) {
+  const isDriving = mode === "DRIVE";
+  const fieldMask = isDriving
+    ? "routes.duration,routes.distanceMeters"
+    : "routes.duration,routes.distanceMeters,routes.legs.steps.transitDetails,routes.legs.steps.navigationInstruction,routes.legs.steps.localizedValues";
+
   const response = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-goog-api-key": config.googleMapsApiKey,
-      "x-goog-fieldmask": "routes.duration,routes.distanceMeters,routes.legs.steps.transitDetails,routes.legs.steps.navigationInstruction,routes.legs.steps.localizedValues"
+      "x-goog-fieldmask": fieldMask
     },
     body: JSON.stringify({
       origin: { address: origin },
       destination: { address: destination },
       travelMode: mode,
-      departureTime: mode === "TRANSIT" ? departureTime.toISOString() : undefined,
+      routingPreference: isDriving ? "TRAFFIC_UNAWARE" : undefined,
+      departureTime: isDriving ? undefined : departureTime.toISOString(),
       computeAlternativeRoutes: false,
       languageCode: "en",
       units: "METRIC"
@@ -1421,7 +1427,7 @@ function travelLines(event, transitUrl, drivingUrl) {
 }
 
 function hasTravelDetails(event) {
-  return Boolean(event.travel?.transit || event.travel?.driving);
+  return Boolean(event.travel?.transit && event.travel?.driving);
 }
 
 function formatOpeners(conversationStarters) {
