@@ -373,7 +373,7 @@ async function computeRoute({ origin, destination, mode, departureTime }) {
       origin: { address: origin },
       destination: { address: destination },
       travelMode: mode,
-      departureTime: departureTime.toISOString(),
+      departureTime: mode === "TRANSIT" ? departureTime.toISOString() : undefined,
       computeAlternativeRoutes: false,
       languageCode: "en",
       units: "METRIC"
@@ -1413,7 +1413,7 @@ function travelLines(event, transitUrl, drivingUrl) {
   if (event.travel?.driving) {
     lines.push(`Car: ${escapeHtml(formatDuration(event.travel.driving.durationSeconds))}${escapeHtml(leaveByText(event.startsAt, event.travel.driving.durationSeconds))}`);
   } else {
-    lines.push(`Car: ${escapeHtml(drivingUrl)}`);
+    lines.push(`Car: <a href="${escapeHtmlAttribute(drivingUrl)}">Here</a>`);
   }
 
   lines.push(`Open in Maps: <a href="${escapeHtmlAttribute(transitUrl)}">Here</a>`);
