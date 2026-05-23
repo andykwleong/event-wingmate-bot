@@ -228,6 +228,22 @@ async function handleMessage(message) {
     return;
   }
 
+  if (text === "/leave_reminder" || text.startsWith("/leave_reminder ")) {
+    await sendMessage(chatId, await manualReminderMessage(chatId, text, "leave_reminder", leaveTimeMessage), {
+      disable_web_page_preview: true,
+      parse_mode: "HTML"
+    });
+    return;
+  }
+
+  if (text === "/networking_reminder" || text.startsWith("/networking_reminder ")) {
+    await sendMessage(chatId, await manualReminderMessage(chatId, text, "networking_reminder", networkingMessage), {
+      disable_web_page_preview: true,
+      parse_mode: "HTML"
+    });
+    return;
+  }
+
   if (text === "/delete_event" || text.startsWith("/delete_event ")) {
     await sendMessage(chatId, await deleteEventMessage(chatId, text));
     return;
@@ -1569,6 +1585,8 @@ function helpMessage() {
     "Commands:",
     "/events - list saved events",
     "/event_details 1 - show full prep and travel for a saved event",
+    "/leave_reminder 1 - show the leave-soon reminder for a saved event",
+    "/networking_reminder 1 - show the networking nudge for a saved event",
     "/delete_event 1 - delete a saved event by number",
     "/delete_all_events - delete all saved events after confirmation",
     "/connect_calendar - connect Google Calendar",
@@ -1726,6 +1744,25 @@ async function eventDetailsMessage(chatId, text) {
   }
 
   return eventPrepMessage(event);
+}
+
+async function manualReminderMessage(chatId, text, command, buildMessage) {
+  const events = await readEventsForChat(chatId);
+  if (events.length === 0) return "No saved events yet. Paste a Luma link or event text to add one.";
+
+  const number = Number(text.match(new RegExp(`^/${command}\\s+(\\d+)$`))?.[1]);
+  if (!Number.isInteger(number) || number < 1 || number > events.length) {
+    return compactMessage([
+      "Which event should I use?",
+      "",
+      ...events.map((event, index) => `${index + 1}. ${escapeHtml(formatTitle(event.title))} - ${escapeHtml(formatDateTime(event.startsAt))}`),
+      "",
+      `Send /${command} followed by the number.`,
+      `Example: /${command} 1`
+    ]);
+  }
+
+  return buildMessage(events[number - 1]);
 }
 
 async function deleteEventMessage(chatId, text) {

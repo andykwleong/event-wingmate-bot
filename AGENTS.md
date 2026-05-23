@@ -64,6 +64,8 @@ Google Maps billing safety:
 - `/events` - list upcoming saved events with date/time and location status
 - `/event_details 1` - manually generate full prep and travel for a saved event
 - `/events_details 1` - alias for `/event_details 1`
+- `/leave_reminder 1` - manually show the leave-soon reminder for a saved event
+- `/networking_reminder 1` - manually show the networking nudge for a saved event
 - `/delete_event 1` - delete a saved event by number
 - `/delete_all_events` - ask for confirmation before deleting all saved events for the chat
 - `/delete_all_events confirm` - delete all saved events for the chat and stop their reminders
@@ -95,6 +97,7 @@ Google Maps billing safety:
 - Day-before reminders are scheduled 24 hours before event start and should include the full prep format: venue, Luma link, summary, transit, car, map link, three openers, and tiny mission.
 - Leave-time reminders are scheduled 1 hour before event start and should use Google Maps links without a fixed origin so Maps opens from the user's current location.
 - Networking reminders are scheduled 30 minutes before extracted networking time, or 30 minutes after event start if no networking time is extracted.
+- `/leave_reminder [number]` and `/networking_reminder [number]` manually trigger those reminder templates without marking automatic reminders as sent.
 
 ## Reply Format
 

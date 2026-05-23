@@ -38,6 +38,8 @@ Telegram
 - `/events` - list upcoming saved events
 - `/event_details 1` - manually generate full prep and travel for event 1
 - `/events_details 1` - alias for `/event_details 1`
+- `/leave_reminder 1` - manually show the leave-soon reminder for event 1
+- `/networking_reminder 1` - manually show the networking nudge for event 1
 - `/delete_event 1` - delete event 1, including saved duplicate copies, and stop its reminders
 - `/delete_all_events` - ask for confirmation before deleting all saved events
 - `/delete_all_events confirm` - delete all saved events for the current chat
