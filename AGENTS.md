@@ -94,7 +94,7 @@ Google Maps billing safety:
 - Deleting an event removes all saved copies with the same event fingerprint from Supabase, so future reminders stop.
 - Bulk deletion removes all events for the current Telegram chat after explicit confirmation.
 - Events are deleted automatically from Supabase 24 hours after the event start.
-- Day-before reminders are scheduled 24 hours before event start and should include the full prep format: venue, Luma link, summary, transit, car, map link, three openers, and tiny mission.
+- Day-before reminders are scheduled 24 hours before event start, expire 22 hours before event start, and should include the full prep format: venue, Luma link, summary, transit, car, map link, three openers, and tiny mission.
 - Leave-time reminders are scheduled 1 hour before event start and should use Google Maps links without a fixed origin so Maps opens from the user's current location.
 - Networking reminders are scheduled 30 minutes before extracted networking time, or 30 minutes after event start if no networking time is extracted.
 - `/leave_reminder [number]` and `/networking_reminder [number]` manually trigger those reminder templates without marking automatic reminders as sent.

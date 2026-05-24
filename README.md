@@ -213,6 +213,7 @@ It should return:
 - If an event is more than 24 hours away, the bot sends a lighter saved confirmation with three prep ideas.
 - Future-event prep ideas prefer event-specific questions over generic openers, and wording varies within event categories.
 - The 24-hour reminder uses the full prep format: venue, Luma link, summary, transit, car, map link, three openers, and tiny mission.
+- The 24-hour reminder expires after a short catch-up window, so it will not be sent late on the event day.
 - The 1-hour leave reminder uses Google Maps links without a fixed origin, so Maps opens from the user's current location.
 - The networking reminder sends 30 minutes before an extracted networking time, or 30 minutes after event start when no networking time is known.
 - Use `/event_details 1` to manually generate full prep and travel for any saved event.

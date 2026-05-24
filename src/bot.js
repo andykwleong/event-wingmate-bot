@@ -1834,7 +1834,7 @@ async function sendDueReminders() {
       {
         key: "dayBefore",
         dueAt: startsAt - 24 * 60 * 60 * 1000,
-        expiresAt: startsAt,
+        expiresAt: startsAt - 22 * 60 * 60 * 1000,
         buildMessage: async () => {
           await enrichEventWithCalendar(event);
           await enrichEventWithTravel(event);
