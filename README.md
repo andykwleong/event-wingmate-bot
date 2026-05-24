@@ -35,7 +35,7 @@ Telegram
 - `/start` - welcome message
 - `/help` - command list
 - `/settings` - configuration and connection status
-- `/events` - list upcoming saved events
+- `/event` or `/events` - list upcoming saved events
 - `/event_details 1` - manually generate full prep and travel for event 1
 - `/events_details 1` - alias for `/event_details 1`
 - `/leave_reminder 1` - manually show the leave-soon reminder for event 1

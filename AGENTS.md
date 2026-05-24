@@ -61,7 +61,7 @@ Google Maps billing safety:
 - `/start` - welcome
 - `/help` - command list
 - `/settings` - show config status, including Google Calendar connection
-- `/events` - list upcoming saved events with date/time and location status
+- `/event` or `/events` - list upcoming saved events with date/time and location status
 - `/event_details 1` - manually generate full prep and travel for a saved event
 - `/events_details 1` - alias for `/event_details 1`
 - `/leave_reminder 1` - manually show the leave-soon reminder for a saved event

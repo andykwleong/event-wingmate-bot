@@ -215,7 +215,7 @@ async function handleMessage(message) {
     return;
   }
 
-  if (text === "/events") {
+  if (text === "/event" || text === "/events") {
     await sendMessage(chatId, await eventsMessage(chatId));
     return;
   }
@@ -1583,7 +1583,7 @@ function welcomeMessage() {
 function helpMessage() {
   return [
     "Commands:",
-    "/events - list saved events",
+    "/event or /events - list saved events",
     "/event_details 1 - show full prep and travel for a saved event",
     "/leave_reminder 1 - show the leave-soon reminder for a saved event",
     "/networking_reminder 1 - show the networking nudge for a saved event",
