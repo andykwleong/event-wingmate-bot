@@ -6,7 +6,7 @@ Paste a Luma link or event text, and the bot can save the event, extract the det
 
 ## Demo
 
-Watch the demo on LinkedIn: [Event Wingmate demo]([YOUR_LINKEDIN_POST_URL](https://www.linkedin.com/posts/andykwleong_in-the-run-up-to-ai-engineer-singapore-there-ugcPost-7464521977677029376-e1tc/?utm_source=share&utm_medium=member_desktop&rcm=ACoAAAZznM0BipAqrXIkXhUs9UnqZb8aNZ77Sg8))
+Watch the demo on LinkedIn: [Event Wingmate demo](https://www.linkedin.com/posts/andykwleong_in-the-run-up-to-ai-engineer-singapore-there-ugcPost-7464521977677029376-e1tc/?utm_source=share&utm_medium=member_desktop&rcm=ACoAAAZznM0BipAqrXIkXhUs9UnqZb8aNZ77Sg8)
 
 ## Features
 
